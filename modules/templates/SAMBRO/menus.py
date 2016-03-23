@@ -97,9 +97,11 @@ class S3MainMenu(default.S3MainMenu):
         if not auth.is_logged_in():
             menu_auth = MM("Login", link=False, right=True)(
                            MM("Login", c="default", f="user", m="login",
-                              vars={"_next": URL(c="default", f="index")}),
+                              vars={"_next": URL(c="cap", f="alert")}),
                            MM("Lost Password", c="default", f="user",
-                              m="retrieve_password")
+                              m="retrieve_password"),
+                           MM("Request for Account", c="default", f="user",
+                              m="register"),
                         )
         else:
             # Logged-in
@@ -179,7 +181,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                       check=cap_editors)(
                         M("Create", m="create"),
                         M("Import from Feed URL", m="import_feed", p="create",
-                          restrict=["ADMIN"]),
+                          check=cap_editors),
                     ),
                     M("Templates", f="template")(
                         M("Create", m="create",

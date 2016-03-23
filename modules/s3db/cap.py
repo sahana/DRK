@@ -87,6 +87,7 @@ class S3CAPModel(S3Model):
         configure = self.configure
         crud_strings = current.response.s3.crud_strings
         define_table = self.define_table
+        set_method = self.set_method
         UNKNOWN_OPT = current.messages.UNKNOWN_OPT
 
         # ---------------------------------------------------------------------
@@ -394,14 +395,20 @@ class S3CAPModel(S3Model):
                            ),
                      Field("addresses", "list:string",
                            label = T("Recipients"),
-                           represent = self.list_string_represent,
+                           requires = IS_EMPTY_OR(
+                                        IS_IN_SET(get_cap_alert_addresses_opts(),
+                                                  multiple = True,
+                                                  sort = True,
+                                                  )
+                                        ),
+                           represent = S3Represent(lookup="pr_group",
+                                                   fields = ["name"],
+                                                   multiple = True,
+                                                   ),
+                           widget = S3MultiSelectWidget(),
                            comment = DIV(_class="tooltip",
                                          _title="%s|%s" % (T("The group listing of intended recipients of the alert message"),
                                                            T("Required when scope is 'Private', optional when scope is 'Public' or 'Restricted'. Each recipient shall be identified by an identifier or an address."))),
-                           #@ToDo: provide a better way to add multiple addresses,
-                           #       do not ask the user to delimit it themselves
-                           #       this should eventually use the CAP contacts
-                           #widget = S3CAPAddressesWidget,
                            ),
                      Field("codes", "list:string",
                            default = settings.get_cap_codes(),
@@ -535,17 +542,17 @@ class S3CAPModel(S3Model):
                        cap_resource = "alert_id",
                        )
 
-        self.set_method("cap", "alert",
-                        method = "import_feed",
-                        action = CAPImportFeed())
+        set_method("cap", "alert",
+                   method = "import_feed",
+                   action = CAPImportFeed())
 
-        self.set_method("cap", "alert",
-                        method = "assign",
-                        action = self.cap_AssignArea())
+        set_method("cap", "alert",
+                   method = "assign",
+                   action = self.cap_AssignArea())
 
-        self.set_method("cap", "alert",
-                        method = "clone",
-                        action = self.cap_CloneAlert())
+        set_method("cap", "alert",
+                   method = "clone",
+                   action = self.cap_CloneAlert())
 
         if crud_strings["cap_template"]:
             crud_strings[tablename] = crud_strings["cap_template"]
@@ -639,8 +646,8 @@ class S3CAPModel(S3Model):
                      Field("name", notnull=True, length=64, unique=True,
                            label = T("Name"),
                            requires = [IS_NOT_ONE_OF(db, "%s.name" % tablename),
-                                       IS_MATCH('^[^"]+$',
-                                               error_message=T('Cannot be empty and Must not include "'))],
+                                       IS_MATCH('^[^"\']+$',
+                                               error_message=T('Name cannot be empty and Must not include " or (\')'))],
                            comment = DIV(_class="tooltip",
                                          _title="%s|%s" % (T("Name"),
                                                            T("The actual name for the warning priority, for eg. Typhoons in Philippines have five priority names (PSWS# 1, PSWS# 2, PSWS# 3, PSWS# 4 and PSWS# 5)"))),
@@ -649,7 +656,7 @@ class S3CAPModel(S3Model):
                                         label = T("Event Type"),
                                         comment = DIV(_class="tooltip",
                                                       _title="%s|%s" % (T("Event Type"),
-                                                                        T("The Event to which this priority is targeted for. The 'Event Type' is the name of the standard Eden Event Type . These are available at /eden/event/event_type (The 'Event Type' should be exactly same as in /eden/event/event_type - case sensitive). For those events which are not in /eden/event/event_type but having the warning priority, you can create the event type using /eden/event/event_type/create and they will appear in this list."))),
+                                                                        T("The Event to which this priority is targeted for."))),
                            ),
                      Field("urgency",
                            label = T("Urgency"),
@@ -1291,6 +1298,8 @@ T("Upload an image file(bmp, gif, jpeg or png), max. 800x800 pixels!"))),
         area_represent = cap_AreaRepresent(show_link=True)
 
         configure(tablename,
+                  context = {"location": "location.location_id",
+                             },
                   #create_next = URL(f="area", args=["[id]", "location"]),
                   crud_form = crud_form,
                   deduplicate = self.cap_area_duplicate,
@@ -1542,14 +1551,20 @@ T("Upload an image file(bmp, gif, jpeg or png), max. 800x800 pixels!"))),
                 multi-field level
         """
 
-        form_vars = form.vars
-        if form_vars.get("scope") == "Private" and not form_vars.get("addresses"):
-            form.errors["addresses"] = \
-                current.T("'Recipients' field mandatory in case of 'Private' scope")
-
-        if form_vars.get("scope") == "Restricted" and not form_vars.get("restriction"):
-            form.errors["restriction"] = \
-                current.T("'Restriction' field mandatory in case of 'Restricted' scope")
+        form_vars_get = form.vars.get
+        if not form_vars_get("is_template"):
+            # For non templates
+            if form_vars_get("scope") == "Private" and not form_vars_get("addresses"):
+                form.errors["addresses"] = \
+                    current.T("'Recipients' field mandatory in case of 'Private' scope")
+    
+            if form_vars_get("scope") == "Restricted" and not form_vars_get("restriction"):
+                form.errors["restriction"] = \
+                    current.T("'Restriction' field mandatory in case of 'Restricted' scope")
+    
+            if form_vars_get("addresses") and not form_vars_get("scope"):
+                form.errors["scope"] = \
+                    current.T("'Scope' field mandatory in case using 'Recipients' field")
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1852,6 +1867,16 @@ def json_formatter(fstring):
     return fstring
 
 # =============================================================================
+def get_cap_alert_addresses_opts():
+    """ Get the pr_group.id required for cap_alert.addresses field"""
+
+    T = current.T
+    gtable = current.s3db.pr_group
+    rows = current.db(gtable.deleted != True).select(gtable.id,
+                                                     gtable.name)
+    return [(row.id, s3_str(T(row.name))) for row in rows]
+
+# =============================================================================
 def cap_alert_is_template(alert_id):
     """
         Tell whether an alert entry is a template
@@ -1949,32 +1974,16 @@ def cap_rheader(r):
                             area_row = db(area_table.alert_id == alert_id).\
                                                 select(area_table.id,
                                                        limitby=(0, 1)).first()
-                            if area_row:
-                                # For Alert Editor
-                                if has_permission("update", "cap_alert",
-                                                  record_id=alert_id):
-                                    # Get the user ids for the role alert_approver
-                                    agtable = db.auth_group
-                                    group_row = db(agtable.role == "Alert Approver").\
-                                                   select(agtable.id,
-                                                          limitby=(0, 1)).first()
-                                    if group_row:
-                                        user_pe_id = auth.s3_user_pe_id
-                                        user_ids = auth.s3_group_members(group_row.id) # List of user_ids
-                                        pe_ids = [] # List of pe_ids
-                                        pe_append = pe_ids.append
-                                        for user_id in user_ids:
-                                            pe_append(user_pe_id(int(user_id)))
-
-                                    action_btn = A(T("Submit for Approval"),
-                                                   _href = URL(f = "compose",
-                                                               vars = {"cap_alert.id": record.id,
-                                                                       "pe_ids": pe_ids,
-                                                                       },
-                                                               ),
-                                                   _class = "action-btn confirm-btn"
-                                                   )
-                                    current.response.s3.jquery_ready.append(
+                            if area_row and has_permission("update", "cap_alert",
+                                                           record_id=record.id):
+                                action_btn = A(T("Submit for Approval"),
+                                               _href = URL(f = "notify_approver",
+                                                           vars = {"cap_alert.id": record.id,
+                                                                   },
+                                                           ),
+                                               _class = "action-btn confirm-btn"
+                                               )
+                                current.response.s3.jquery_ready.append(
 '''S3.confirmClick('.confirm-btn','%s')''' % T("Do you want to submit the alert for approval?"))
 
                                 # For Alert Approver

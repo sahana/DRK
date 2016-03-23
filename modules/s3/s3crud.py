@@ -671,6 +671,7 @@ class S3CRUD(S3Method):
             output["deduplicate"] = S3Merge.bookmark(r, tablename, record_id)
 
         elif representation == "plain":
+            # e.g. Map Popup
             T = current.T
             fields = [f for f in table if f.readable]
             if r.component:
@@ -1434,13 +1435,15 @@ class S3CRUD(S3Method):
                 #    #datatable = DIV(self.crud_string(resource.tablename,
                 #                                      "msg_no_match"),
                 #                     _class="empty")
-                s3.no_formats = True
+
+                # Must include export formats to allow subsequent unhiding
+                # when Ajax (un-)filtering produces exportable table contents:
+                #s3.no_formats = True
 
                 if r.component and "showadd_btn" in output:
                     # Hide the list and show the form by default
                     del output["showadd_btn"]
                     datatable = ""
-            #else:
 
             # Always show table, otherwise it can't be Ajax-filtered
             # @todo: need a better algorithm to determine total_rows

@@ -37,7 +37,9 @@ def config(settings):
     #settings.base.theme = "SAMBRO"
 
     # The Registration functionality shouldn't be visible to the Public
-    settings.security.registration_visible = False
+    #settings.security.registration_visible = True
+
+    settings.auth.registration_requires_approval = True
 
     # Link Users to Organisations
     settings.auth.registration_requests_organisation = True
@@ -112,7 +114,6 @@ def config(settings):
         #("vi", "Tiếng Việt"),   # Vietnamese
         #("zh-cn", "中文 (简体)"),
     ])
-    settings.L10n.languages = languages
     settings.cap.languages = languages
     # Translate the cap_area name
     settings.L10n.translate_cap_area = True
@@ -234,34 +235,33 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_cap_alert_resource(r, tablename):
 
+        T = current.T
+        db = current.db
         s3db = current.s3db
         def onapprove(record):
             # Normal onapprove
             s3db.cap_alert_approve(record)
-
             # Sync FTP Repository
             current.s3task.async("cap_ftp_sync")
 
             # Twitter Post
-            if settings.get_cap_post_to_twitter():
+            if settings.get_cap_post_to_twitter() and \
+               record["scope"] != "Private":
                 try:
                     import tweepy
                 except ImportError:
                     current.log.debug("tweepy module needed for sending tweets")
                 else:
-                    T = current.T
-                    db = current.db
                     alert_id = int(record["id"])
                     atable = s3db.cap_alert
                     itable = s3db.cap_info
         
                     arow = db(atable.id == alert_id).select(atable.status,
-                                                            atable.sender,
-                                                            atable.sent,
                                                             limitby=(0, 1)).first()
                     query = (itable.alert_id == alert_id) & \
                             (itable.deleted != True)
                     irows = db(query).select(itable.headline,
+                                             itable.sender_name,
                                              itable.web)
                     # @ToDo: shorten url
                     # @ToDo: Handle the multi-message nicely?
@@ -273,13 +273,72 @@ def config(settings):
 %(WEBSITE)s: %(Website)s""") % dict(Status = arow.status,
                                     Headline = s3_str(irow.headline),
                                     SENDER = T("Sender"),
-                                    SenderName = s3_str(arow.sender),
+                                    SenderName = s3_str(irow.sender_name),
                                     WEBSITE = T("Website"),
                                     Website = irow.web)
                         try:
                             current.msg.send_tweet(text=twitter_text)
                         except tweepy.error.TweepError, e:
                             current.log.debug("Sending tweets failed: %s" % e)
+
+            # Send out private alerts to addresses
+            # @ToDo: Check for LEFT join when required
+            # this is ok for now since every Alert should have an Info & an Area
+            # @ToDo: Handle multi-lingual alerts when required
+            if record["scope"] == "Private":
+                table = s3db.cap_alert
+                itable = s3db.cap_info
+                atable = s3db.cap_area
+                gtable = s3db.pr_group
+                send_by_pe_id = current.msg.send_by_pe_id
+
+                alert_id = record["id"]
+                addresses = record["addresses"]
+                query = (table.id == alert_id) & \
+                        (itable.alert_id == table.id) & \
+                        (itable.deleted != True) & \
+                        (atable.alert_id == table.id) & \
+                        (atable.deleted != True)
+                row = db(query).select(table.identifier,
+                                       table.msg_type,
+                                       table.scope,
+                                       table.sent,
+                                       table.source,
+                                       table.status,
+                                       itable.category,
+                                       itable.certainty,
+                                       itable.contact,
+                                       itable.effective,
+                                       itable.expires,
+                                       itable.event_type_id,
+                                       itable.headline,
+                                       itable.instruction,
+                                       itable.priority,
+                                       itable.response_type,
+                                       itable.sender_name,
+                                       itable.severity,
+                                       itable.urgency,
+                                       itable.web,
+                                       atable.name,
+                                       limitby=(0, 1)).first()
+                subject = "%s %s %s" % (T("SAHANA"),
+                                        settings.get_system_name_short(),
+                                        T("Alert Notification"))
+                email_content = "%s%s%s" % ("<html>", XML(get_html_email_content(row)), "</html>")
+                sms_content = get_sms_content(row)
+                count = len(addresses)
+                if count == 1:
+                    query = (gtable.id == addresses[0])
+                else:
+                    query = (gtable.id.belongs(addresses))
+                rows = db(query).select(gtable.pe_id,
+                                        limitby = (0, count))
+                for row_ in rows:
+                    send_by_pe_id(row_.pe_id, subject, email_content)
+                    try:
+                        send_by_pe_id(row_.pe_id, subject, sms_content, contact_method="SMS")
+                    except ValueError:
+                        current.log.error("No SMS Handler defined!")
 
         s3db.configure(tablename,
                        onapprove = onapprove,
@@ -307,6 +366,11 @@ def config(settings):
                 table.scope.represent = None
                 table.status.represent = None
                 table.msg_type.represent = None
+
+                itable = current.s3db.cap_info
+                itable.severity.represent = None
+                itable.urgency.represent = None
+                itable.certainty.represent = None
 
             return result
         s3.prep = custom_prep
@@ -480,7 +544,7 @@ def config(settings):
         output = {}
         new, upd = [], []
         if format == "text":
-            # Standard text format
+            # For SMS
             labels = []
             append = labels.append
 
@@ -713,7 +777,7 @@ def config(settings):
                         values = filter[1].split(",")
                         if prefix == "event_type_id__belongs":
                             event_type_id = s3_str(values[0])
-                            row_ = db(etable.id==event_type_id).select(\
+                            row_ = db(etable.id == event_type_id).select(\
                                                         etable.name,
                                                         limitby=(0, 1)).first()
                             event_type = row_.name
@@ -747,6 +811,29 @@ def config(settings):
             prepare the content for html email
         """
 
+        from gluon.languages import lazyT
+        itable = current.s3db.cap_info
+        event_type_id = row["cap_info.event_type_id"]
+        priority_id = row["cap_info.priority"]
+
+        if not isinstance(event_type_id, lazyT):
+            event_type = itable.event_type_id.represent(event_type_id)
+        else:
+            event_type = event_type_id
+
+        if priority_id and \
+           priority_id != "-":
+            if not isinstance(priority_id, lazyT):
+                priority = itable.priority.represent(priority_id)
+            else:
+                priority = priority_id
+        else:
+            priority = T("None")
+
+        category = itable.category.represent(row["cap_info.category"])
+
+        response_type = itable.response_type.represent(row["cap_info.response_type"])
+
         subject = \
         T("%(Scope)s %(Status)s Alert: %(Headline)s (ID: %(Identifier)s)") % \
             dict(Scope = s3_str(row["cap_alert.scope"]),
@@ -756,28 +843,28 @@ def config(settings):
         body1 = \
 T("""%(Priority)s priority %(MessageType)s 
 message in effect for %(AreaDescription)s""") % dict(\
-                    Priority = s3_str(row["cap_info.priority"]),
+                    Priority = s3_str(priority),
                     MessageType = s3_str(row["cap_alert.msg_type"]),
                     AreaDescription = s3_str(row["cap_area.name"]))
         body2 = \
         T("This %(Severity)s %(EventType)s is %(Urgency)s and is %(Certainty)s") %\
             dict(Severity = s3_str(row["cap_info.severity"]),
-                 EventType = s3_str(row["cap_info.event_type_id"]),
+                 EventType = s3_str(event_type),
                  Urgency = s3_str(row["cap_info.urgency"]),
                  Certainty = s3_str(row["cap_info.certainty"]))
         body3 = \
 T("""Message %(Identifier)s: %(EventType)s (%(Category)s) issued by 
 %(SenderName)s sent at %(Date)s from %(Source)s""") % \
                  dict(Identifier = s3_str(row["cap_alert.identifier"]),
-                      EventType = s3_str(row["cap_info.event_type_id"]),
-                      Category = s3_str(row["cap_info.category"]),
+                      EventType = s3_str(event_type),
+                      Category = s3_str(category),
                       SenderName = s3_str(row["cap_info.sender_name"]),
                       Date = s3_str(row["cap_alert.sent"]),
                       Source = s3_str(row["cap_alert.source"]))
         body4 = T("Alert Description: %(AreaDescription)s") % \
                 dict(AreaDescription = s3_str(row["cap_area.name"]))
         body5 = T("Expected Response: %(ResponseType)s") % \
-                dict(ResponseType = s3_str(row["cap_info.response_type"]))
+                dict(ResponseType = s3_str(response_type))
         body6 = T("Instructions: %(Instruction)s") % \
                 dict(Instruction=s3_str(row["cap_info.instruction"]))
         body7 = \
@@ -788,7 +875,7 @@ T("Alert is effective from %(Effective)s and expires on %(Expires)s") % \
                 dict(URL = s3_str(row["cap_info.web"]),
                      Contact = s3_str(row["cap_info.contact"]))
         body9 = A(T("VIEW ALERT ON THE WEB"),
-                    _href = URL(s3_str(row["cap_info.web"]), "/profile"))
+                    _href = "%s/%s" % (s3_str(row["cap_info.web"]), "profile"))
         return TAG[""](HR(), BR(),
                        subject,
                        BR(), BR(),
@@ -810,5 +897,43 @@ T("Alert is effective from %(Effective)s and expires on %(Expires)s") % \
                        BR(), BR(),
                        body9,
                        BR())
+
+    # -------------------------------------------------------------------------
+    def get_sms_content(row):
+        """
+            prepare the content for SMS
+        """
+
+        from gluon.languages import lazyT
+        itable = current.s3db.cap_info
+        event_type_id = row["cap_info.event_type_id"]
+        priority_id = row["cap_info.priority"]
+
+        if not isinstance(event_type_id, lazyT):
+            event_type = itable.event_type_id.represent(event_type_id)
+        else:
+            event_type = event_type_id
+
+        if priority_id and priority_id != "-":
+            if not isinstance(priority_id, lazyT):
+                priority = itable.priority.represent(priority_id)
+            else:
+                priority = priority_id
+        else:
+            priority = T("None")
+
+        sms_body = \
+T("""%(Status)s %(MessageType)s for %(AreaDescription)s with %(Priority)s
+priority %(EventType)s issued by %(SenderName)s at %(Date)s (ID:%(Identifier)s)""") % \
+            dict(Status = s3_str(row["cap_alert.status"]),
+                 MessageType = s3_str(row["cap_alert.msg_type"]),
+                 AreaDescription = s3_str(row["cap_area.name"]),
+                 Priority = s3_str(priority),
+                 EventType = s3_str(event_type),
+                 SenderName = s3_str(row["cap_info.sender_name"]),
+                 Date = s3_str(row["cap_alert.sent"]),
+                 Identifier = s3_str(row["cap_alert.identifier"]))
+
+        return sms_body
 
 # END =========================================================================

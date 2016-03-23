@@ -638,6 +638,7 @@ class S3EmailModel(S3ChannelModel):
                      s3_datetime(default = "now"),
                      Field("subject", length=78,    # RFC 2822
                            label = T("Subject"),
+                           requires = IS_EMPTY_OR(IS_LENGTH(78)),
                            ),
                      Field("body", "text",
                            label = T("Message"),
@@ -2247,6 +2248,7 @@ class S3BaseStationModel(S3Model):
                           Field("name", notnull=True,
                                 length=64, # Mayon Compatibility
                                 label = T("Name"),
+                                requires = IS_NOT_EMPTY(),
                                 ),
                           Field("code", length=10, # Mayon compatibility
                                 label = T("Code"),

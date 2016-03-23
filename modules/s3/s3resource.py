@@ -28,7 +28,7 @@
 
     @group Resource API: S3Resource,
     @group Filter API: S3ResourceFilter
-    @group Helper Classes: S3RecordMerger
+    @group Helper Classes: S3AxisFilter, S3ResourceData
 """
 
 __all__ = ("S3AxisFilter",
@@ -119,7 +119,8 @@ class S3Resource(object):
                  include_deleted=False,
                  approved=True,
                  unapproved=False,
-                 context=False):
+                 context=False,
+                 extra_filters=None):
         """
             Constructor
 
@@ -149,6 +150,9 @@ class S3Resource(object):
             @param approved: include approved records
             @param unapproved: include unapproved records
             @param context: apply context filters
+            @param extra_filters: extra filters (to be applied on
+                                  pre-filtered subsets), as list of
+                                  tuples (method, expression)
         """
 
         s3db = current.s3db
@@ -275,14 +279,17 @@ class S3Resource(object):
             # This is the master resource - attach components
             attach = self._attach
             hooks = s3db.get_components(table, names=components)
-            [attach(alias, hooks[alias]) for alias in hooks]
+            for alias in hooks:
+                attach(alias, hooks[alias])
 
             # Build query
-            self.build_query(id=id,
-                             uid=uid,
-                             filter=filter,
-                             vars=vars,
-                             filter_component=filter_component)
+            self.build_query(id = id,
+                             uid = uid,
+                             filter = filter,
+                             vars = vars,
+                             extra_filters = extra_filters,
+                             filter_component = filter_component,
+                             )
             if context:
                 self.add_filter(s3db.context)
 
@@ -290,11 +297,12 @@ class S3Resource(object):
         elif linktable is not None:
             # This is link-table component - attach the link table
             self.link = S3Resource(linktable,
-                                   parent=self.parent,
-                                   linked=self,
-                                   include_deleted=self.include_deleted,
-                                   approved=self._approved,
-                                   unapproved=self._unapproved)
+                                   parent = self.parent,
+                                   linked = self,
+                                   include_deleted = self.include_deleted,
+                                   approved = self._approved,
+                                   unapproved = self._unapproved,
+                                   )
 
         # Export and Import ---------------------------------------------------
 
@@ -342,12 +350,13 @@ class S3Resource(object):
 
         # Create as resource
         component = S3Resource(hook.table,
-                               parent=self,
-                               alias=alias,
-                               linktable=hook.linktable,
-                               include_deleted=self.include_deleted,
-                               approved=self._approved,
-                               unapproved=self._unapproved)
+                               parent = self,
+                               alias = alias,
+                               linktable = hook.linktable,
+                               include_deleted = self.include_deleted,
+                               approved = self._approved,
+                               unapproved = self._unapproved,
+                               )
 
         if table_alias:
             component.tablename = hook.tablename
@@ -431,6 +440,7 @@ class S3Resource(object):
                     uid=None,
                     filter=None,
                     vars=None,
+                    extra_filters=None,
                     filter_component=None):
         """
             Query builder
@@ -439,6 +449,9 @@ class S3Resource(object):
             @param uid: record UID or list of record UIDs to include
             @param filter: filtering query (DAL only)
             @param vars: dict of URL query variables
+            @param extra_filters: extra filters (to be applied on
+                                  pre-filtered subsets), as list of
+                                  tuples (method, expression)
             @param filter_component: the alias of the component the URL
                                      filters apply for (filters for this
                                      component must be handled separately)
@@ -448,11 +461,13 @@ class S3Resource(object):
         self._length = None
 
         self.rfilter = S3ResourceFilter(self,
-                                        id=id,
-                                        uid=uid,
-                                        filter=filter,
-                                        vars=vars,
-                                        filter_component=filter_component)
+                                        id = id,
+                                        uid = uid,
+                                        filter = filter,
+                                        vars = vars,
+                                        extra_filters = extra_filters,
+                                        filter_component = filter_component,
+                                        )
         return self.rfilter
 
     # -------------------------------------------------------------------------
@@ -468,9 +483,12 @@ class S3Resource(object):
 
         if f is None:
             return
+
         self.clear()
+
         if self.rfilter is None:
             self.rfilter = S3ResourceFilter(self)
+
         self.rfilter.add_filter(f, component=c)
 
     # -------------------------------------------------------------------------
@@ -485,31 +503,79 @@ class S3Resource(object):
 
         if f is None:
             return
+
         if self.rfilter is None:
             self.rfilter = S3ResourceFilter(self)
+
         self.rfilter.add_filter(f, component=alias, master=False)
 
     # -------------------------------------------------------------------------
+    def add_extra_filter(self, method, expression):
+        """
+            And an extra filter (to be applied on pre-filtered subsets)
+
+            @param method: a name of a known filter method, or a
+                           callable filter method
+            @param expression: the filter expression (string)
+        """
+
+        self.clear()
+
+        if self.rfilter is None:
+            self.rfilter = S3ResourceFilter(self)
+
+        self.rfilter.add_extra_filter(method, expression)
+
+    # -------------------------------------------------------------------------
+    def set_extra_filters(self, filters):
+        """
+            Replace the current extra filters
+
+            @param filters: list of tuples (method, expression), or None
+                            to remove all extra filters
+        """
+
+        self.clear()
+
+        if self.rfilter is None:
+            self.rfilter = S3ResourceFilter(self)
+
+        self.rfilter.set_extra_filters(filters)
+
+    # -------------------------------------------------------------------------
     def get_query(self):
-        """ Get the effective query """
+        """
+            Get the effective query
+
+            @return: Query
+        """
 
         if self.rfilter is None:
             self.build_query()
+
         return self.rfilter.get_query()
 
     # -------------------------------------------------------------------------
     def get_filter(self):
-        """ Get the effective virtual fields filter """
+        """
+            Get the effective virtual filter
+
+            @return: S3ResourceQuery
+        """
 
         if self.rfilter is None:
             self.build_query()
+
         return self.rfilter.get_filter()
 
     # -------------------------------------------------------------------------
     def clear_query(self):
-        """ Removes the current query (does not remove the set!) """
+        """
+            Remove the current query (does not remove the set!)
+        """
 
         self.rfilter = None
+
         components = self.components
         if components:
             for c in components:
@@ -595,19 +661,39 @@ class S3Resource(object):
             @param fields: dict of field/value pairs to insert
         """
 
+        table = self.table
+        tablename = self.tablename
+
         # Check permission
-        authorised = current.auth.s3_has_permission("create", self.tablename)
+        authorised = current.auth.s3_has_permission("create", tablename)
         if not authorised:
-            raise IOError("Operation not permitted: INSERT INTO %s" %
-                            self.tablename)
+            from s3error import S3PermissionError
+            raise S3PermissionError("Operation not permitted: INSERT INTO %s" %
+                                    tablename)
 
         # Insert new record
         record_id = self.table.insert(**fields)
 
-        # Audit
+        # Post-process create
         if record_id:
-            record = Storage(fields).update(id=record_id)
-            current.audit("create", self.prefix, self.name, form=record)
+
+            # Audit
+            current.audit("create", self.prefix, self.name, record=record_id)
+
+            record = Storage(fields)
+            record.id = record_id
+
+            # Update super
+            s3db = current.s3db
+            s3db.update_super(table, record)
+
+            # Record owner
+            auth = current.auth
+            auth.s3_set_record_owner(table, record_id)
+            auth.s3_make_session_owner(table, record_id)
+
+            # Execute onaccept
+            s3db.onaccept(tablename, record, method="create")
 
         return record_id
 
@@ -4090,6 +4176,7 @@ class S3ResourceFilter(object):
                  uid=None,
                  filter=None,
                  vars=None,
+                 extra_filters=None,
                  filter_component=None):
         """
             Constructor
@@ -4097,8 +4184,11 @@ class S3ResourceFilter(object):
             @param resource: the S3Resource
             @param id: the record ID (or list of record IDs)
             @param uid: the record UID (or list of record UIDs)
-            @param filter: a filter query (Query or S3ResourceQuery)
+            @param filter: a filter query (S3ResourceQuery or Query)
             @param vars: the dict of GET vars (URL filters)
+            @param extra_filters: extra filters (to be applied on
+                                  pre-filtered subsets), as list of
+                                  tuples (method, expression)
             @param filter_component: the alias of the component the URL
                                      filters apply for (filters for this
                                      component must be handled separately)
@@ -4110,6 +4200,13 @@ class S3ResourceFilter(object):
         self.filters = []
         self.cqueries = {}
         self.cfilters = {}
+
+        # Extra filters
+        self._extra_filter_methods = None
+        if extra_filters:
+            self.set_extra_filters(extra_filters)
+        else:
+            self.efilters = []
 
         self.query = None
         self.rfltr = None
@@ -4230,6 +4327,32 @@ class S3ResourceFilter(object):
             self.add_filter(filter)
 
     # -------------------------------------------------------------------------
+    # Properties
+    # -------------------------------------------------------------------------
+    @property
+    def extra_filter_methods(self):
+        """
+            Getter for extra filter methods, lazy property so methods
+            are only imported/initialized when needed
+
+            @todo: document the expected signature of filter methods
+
+            @return: dict {name: callable} of known named filter methods
+        """
+
+        methods = self._extra_filter_methods
+        if methods is None:
+
+            # @todo: implement hooks
+            methods = {}
+
+            self._extra_filter_methods = methods
+
+        return methods
+
+    # -------------------------------------------------------------------------
+    # Manipulation
+    # -------------------------------------------------------------------------
     def add_filter(self, query, component=None, master=True):
         """
             Extend this filter
@@ -4268,6 +4391,40 @@ class S3ResourceFilter(object):
             filters.append(query)
         return
 
+    # -------------------------------------------------------------------------
+    def add_extra_filter(self, method, expression):
+        """
+            Add an extra filter
+
+            @param method: a name of a known filter method, or a
+                           callable filter method
+            @param expression: the filter expression (string)
+        """
+
+        efilters = self.efilters
+        efilters.append((method, expression))
+
+        return efilters
+
+    # -------------------------------------------------------------------------
+    def set_extra_filters(self, filters):
+        """
+            Replace the current extra filters
+
+            @param filters: list of tuples (method, expression), or None
+                            to remove all extra filters
+        """
+
+        self.efilters = []
+        if filters:
+            add = self.add_extra_filter
+            for method, expression in filters:
+                add(method, expression)
+
+        return self.efilters
+
+    # -------------------------------------------------------------------------
+    # Getters
     # -------------------------------------------------------------------------
     def get_query(self):
         """ Get the effective DAL query """
@@ -4310,6 +4467,16 @@ class S3ResourceFilter(object):
         if self.query is None:
             self.get_query()
         return self.vfltr
+
+    # -------------------------------------------------------------------------
+    def get_extra_filters(self):
+        """
+            Get the list of extra filters
+
+            @return: list of tuples (method, expression)
+        """
+
+        return list(self.efilters)
 
     # -------------------------------------------------------------------------
     def get_joins(self, left=False, as_list=True):
@@ -4364,6 +4531,224 @@ class S3ResourceFilter(object):
             return self.vfltr.fields()
         else:
             return []
+
+    # -------------------------------------------------------------------------
+    # Filtering
+    # -------------------------------------------------------------------------
+    def __call__(self, rows, start=None, limit=None):
+        """
+            Filter a set of rows by the effective virtual filter
+
+            @param rows: a Rows object
+            @param start: index of the first matching record to select
+            @param limit: maximum number of records to select
+        """
+
+        vfltr = self.get_filter()
+
+        if rows is None or vfltr is None:
+            return rows
+        resource = self.resource
+        if start is None:
+            start = 0
+        first = start
+        if limit is not None:
+            last = start + limit
+            if last < first:
+                first, last = last, first
+            if first < 0:
+                first = 0
+            if last < 0:
+                last = 0
+        else:
+            last = None
+        i = 0
+        result = []
+        append = result.append
+        for row in rows:
+            if last is not None and i >= last:
+                break
+            success = vfltr(resource, row, virtual=True)
+            if success or success is None:
+                if i >= first:
+                    append(row)
+                i += 1
+        return Rows(rows.db, result,
+                    colnames=rows.colnames, compact=False)
+
+    # -------------------------------------------------------------------------
+    def apply_extra_filters(self, ids, start=None, limit=None):
+        """
+            Apply all extra filters on a list of record ids
+
+            @param ids: the pre-filtered set of record IDs
+            @param limit: the maximum number of matching IDs to establish,
+                          None to find all matching IDs
+
+            @return: a sequence of matching IDs
+        """
+
+        # Get the resource
+        resource = self.resource
+
+        # Get extra filters
+        efilters = self.efilters
+
+        # Resolve filter methods
+        methods = self.extra_filter_methods
+        filters = []
+        append = filters.append
+        for method, expression in efilters:
+            if callable(method):
+                append((method, expression))
+            else:
+                method = methods.get(method)
+                if method:
+                    append((method, expression))
+                else:
+                    current.log.warning("Unknown filter method: %s" % method)
+        if not filters:
+            # No applicable filters
+            return ids
+
+        # Clear extra filters so that apply_extra_filters is not
+        # called from inside a filter method (e.g. if the method
+        # uses resource.select)
+        self.efilters = []
+
+        # Initialize subset
+        subset = set()
+        tail = ids
+        limit_ = limit
+
+        while tail:
+
+            if limit:
+                head, tail = tail[:limit_], tail[limit_:]
+            else:
+                head, tail = tail, None
+
+            match = head
+            for method, expression in filters:
+                # Apply filter
+                match = method(resource, match, expression)
+                if not match:
+                    break
+
+            if match:
+                subset |= set(match)
+
+            found = len(subset)
+
+            if limit:
+                if found < limit:
+                    # Need more
+                    limit_ = limit - found
+                else:
+                    # Found all
+                    tail = None
+
+        # Restore order
+        subset = [item for item in ids if item in subset]
+
+        # Select start
+        if start:
+            subset = subset[start:]
+
+        # Restore extra filters
+        self.efilters = efilters
+
+        return subset
+
+    # -------------------------------------------------------------------------
+    def count(self, left=None, distinct=False):
+        """
+            Get the total number of matching records
+
+            @param left: left outer joins
+            @param distinct: count only distinct rows
+        """
+
+        distinct |= self.distinct
+
+        resource = self.resource
+        if resource is None:
+            return 0
+
+        table = resource.table
+
+        vfltr = self.get_filter()
+
+        if vfltr is None and not distinct:
+
+            tablename = table._tablename
+
+            ijoins = S3Joins(tablename, self.get_joins(left=False))
+            ljoins = S3Joins(tablename, self.get_joins(left=True))
+            ljoins.add(left)
+
+            join = ijoins.as_list(prefer=ljoins)
+            left = ljoins.as_list()
+
+            cnt = table._id.count()
+            row = current.db(self.query).select(cnt,
+                                                join=join,
+                                                left=left).first()
+            if row:
+                return row[cnt]
+            else:
+                return 0
+
+        else:
+            data = resource.select([table._id.name],
+                                   # We don't really want to retrieve
+                                   # any rows but just count, hence:
+                                   limit=1,
+                                   count=True)
+            return data["numrows"]
+
+    # -------------------------------------------------------------------------
+    # Utility Methods
+    # -------------------------------------------------------------------------
+    def __repr__(self):
+        """ String representation of the instance """
+
+        resource = self.resource
+
+        inner_joins = self.get_joins(left=False)
+        if inner_joins:
+            inner = S3Joins(resource.tablename, inner_joins)
+            ijoins = ", ".join([str(j) for j in inner.as_list()])
+        else:
+            ijoins = None
+
+        left_joins = self.get_joins(left=True)
+        if left_joins:
+            left = S3Joins(resource.tablename, left_joins)
+            ljoins = ", ".join([str(j) for j in left.as_list()])
+        else:
+            ljoins = None
+
+        vfltr = self.get_filter()
+        if vfltr:
+            vfltr = vfltr.represent(resource)
+        else:
+            vfltr = None
+
+        represent = "<S3ResourceFilter %s, " \
+                    "query=%s, " \
+                    "join=[%s], " \
+                    "left=[%s], " \
+                    "distinct=%s, " \
+                    "filter=%s>" % (resource.tablename,
+                                    self.get_query(),
+                                    ijoins,
+                                    ljoins,
+                                    self.distinct,
+                                    vfltr,
+                                    )
+
+        return represent
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -4522,136 +4907,6 @@ class S3ResourceFilter(object):
         return query, joins
 
     # -------------------------------------------------------------------------
-    def __call__(self, rows, start=None, limit=None):
-        """
-            Filter a set of rows by the effective virtual filter
-
-            @param rows: a Rows object
-            @param start: index of the first matching record to select
-            @param limit: maximum number of records to select
-        """
-
-        vfltr = self.get_filter()
-
-        if rows is None or vfltr is None:
-            return rows
-        resource = self.resource
-        if start is None:
-            start = 0
-        first = start
-        if limit is not None:
-            last = start + limit
-            if last < first:
-                first, last = last, first
-            if first < 0:
-                first = 0
-            if last < 0:
-                last = 0
-        else:
-            last = None
-        i = 0
-        result = []
-        append = result.append
-        for row in rows:
-            if last is not None and i >= last:
-                break
-            success = vfltr(resource, row, virtual=True)
-            if success or success is None:
-                if i >= first:
-                    append(row)
-                i += 1
-        return Rows(rows.db, result,
-                    colnames=rows.colnames, compact=False)
-
-    # -------------------------------------------------------------------------
-    def count(self, left=None, distinct=False):
-        """
-            Get the total number of matching records
-
-            @param left: left outer joins
-            @param distinct: count only distinct rows
-        """
-
-        distinct |= self.distinct
-
-        resource = self.resource
-        if resource is None:
-            return 0
-
-        table = resource.table
-
-        vfltr = self.get_filter()
-
-        if vfltr is None and not distinct:
-
-            tablename = table._tablename
-
-            ijoins = S3Joins(tablename, self.get_joins(left=False))
-            ljoins = S3Joins(tablename, self.get_joins(left=True))
-            ljoins.add(left)
-
-            join = ijoins.as_list(prefer=ljoins)
-            left = ljoins.as_list()
-
-            cnt = table._id.count()
-            row = current.db(self.query).select(cnt,
-                                                join=join,
-                                                left=left).first()
-            if row:
-                return row[cnt]
-            else:
-                return 0
-
-        else:
-            data = resource.select([table._id.name],
-                                   # We don't really want to retrieve
-                                   # any rows but just count, hence:
-                                   limit=1,
-                                   count=True)
-            return data["numrows"]
-
-    # -------------------------------------------------------------------------
-    def __repr__(self):
-        """ String representation of the instance """
-
-        resource = self.resource
-
-        inner_joins = self.get_joins(left=False)
-        if inner_joins:
-            inner = S3Joins(resource.tablename, inner_joins)
-            ijoins = ", ".join([str(j) for j in inner.as_list()])
-        else:
-            ijoins = None
-
-        left_joins = self.get_joins(left=True)
-        if left_joins:
-            left = S3Joins(resource.tablename, left_joins)
-            ljoins = ", ".join([str(j) for j in left.as_list()])
-        else:
-            ljoins = None
-
-        vfltr = self.get_filter()
-        if vfltr:
-            vfltr = vfltr.represent(resource)
-        else:
-            vfltr = None
-
-        represent = "<S3ResourceFilter %s, " \
-                    "query=%s, " \
-                    "join=[%s], " \
-                    "left=[%s], " \
-                    "distinct=%s, " \
-                    "filter=%s>" % (resource.tablename,
-                                    self.get_query(),
-                                    ijoins,
-                                    ljoins,
-                                    self.distinct,
-                                    vfltr,
-                                    )
-
-        return represent
-
-    # -------------------------------------------------------------------------
     def serialize_url(self):
         """
             Serialize this filter as URL query
@@ -4782,9 +5037,7 @@ class S3ResourceData(object):
         vfilter = resource.get_filter()
 
         # Extra filters
-        efilter = None
-        # @todo: implement this
-        #efilter = resource.get_extra_filters()
+        efilter = rfilter.get_extra_filters()
 
         # Is this a paginated request?
         pagination = limit is not None or start
@@ -4971,12 +5224,16 @@ class S3ResourceData(object):
                     else:
                         rows = rfilter(rows)
 
-                # Extra filter (@todo: implement this)
+                # Extra filter
                 if efilter:
                     if vfilter or not ids:
                         ids = self.getids(rows, pkey)
-                    # ids = efilter(ids)
-                    # rows = filter_rows_by_ids(rows, ids)
+                    if pagination and not (getids or count):
+                        limit_ = start + limit
+                    else:
+                        limit_ = None
+                    ids = rfilter.apply_extra_filters(ids, limit = limit_)
+                    rows = self.getrows(rows, ids, pkey)
 
                 if pagination:
                     # Subset selection with vfilter/efilter
@@ -5767,6 +6024,25 @@ class S3ResourceData(object):
                 seen(row_id)
                 append(row_id)
         return result
+
+    # -------------------------------------------------------------------------
+    def getrows(self, rows, ids, pkey):
+        """
+            Select a subset of rows by their record IDs
+
+            @param rows: the Rows
+            @param ids: the record IDs
+            @param pkey: the primary key
+
+            @return: the subset (Rows)
+        """
+
+        if ids:
+            ids = set(ids)
+            subset = lambda row: row[pkey] in ids
+        else:
+            subset = lambda row: False
+        return rows.find(subset)
 
     # -------------------------------------------------------------------------
     def subset(self, rows, ids, start=None, limit=None, has_id=True):

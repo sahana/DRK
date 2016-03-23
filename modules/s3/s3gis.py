@@ -77,6 +77,7 @@ from gluon import *
 #from gluon.http import HTTP, redirect
 from gluon.fileutils import parse_version
 from gluon.languages import lazyT, regex_translate
+from gluon.settings import global_settings
 from gluon.storage import Storage
 
 from s3dal import Rows
@@ -296,16 +297,14 @@ class GIS(object):
             @ToDo: Pass error messages to Result & have JavaScript listen for these
         """
 
-        request = current.request
-
         table = current.s3db.gis_layer_kml
         record = current.db(table.id == record_id).select(table.url,
                                                           limitby=(0, 1)
                                                           ).first()
         url = record.url
 
-        filepath = os.path.join(request.global_settings.applications_parent,
-                                request.folder,
+        filepath = os.path.join(global_settings.applications_parent,
+                                current.request.folder,
                                 "uploads",
                                 "gis_cache",
                                 filename)
@@ -793,8 +792,11 @@ class GIS(object):
         return bearing
 
     # -------------------------------------------------------------------------
-    def get_bounds(self, features=None, parent=None,
-                   bbox_min_size = 0.05, bbox_inset = 0.007):
+    def get_bounds(self,
+                   features = None,
+                   parent = None,
+                   bbox_min_size = None,
+                   bbox_inset = None):
         """
             Calculate the Bounds of a list of Point Features, suitable for
             setting map bounds. If no features are supplied, the current map
@@ -862,6 +864,8 @@ class GIS(object):
                 lat_max = max(lat, lat_max)
 
             # Assure a reasonable-sized box.
+            settings = current.deployment_settings
+            bbox_min_size = bbox_min_size or settings.get_gis_bbox_inset()
             delta_lon = (bbox_min_size - (lon_max - lon_min)) / 2.0
             if delta_lon > 0:
                 lon_min -= delta_lon
@@ -872,6 +876,7 @@ class GIS(object):
                 lat_max += delta_lat
 
             # Move bounds outward by specified inset.
+            bbox_inset = bbox_inset or settings.get_gis_bbox_inset()
             lon_min -= bbox_inset
             lon_max += bbox_inset
             lat_min -= bbox_inset
@@ -2281,7 +2286,7 @@ class GIS(object):
                 precision = settings.get_gis_precision()
                 if tolerance:
                     # Do the Simplify & GeoJSON direct from the DB
-                    web2py_installed_version = parse_version(current.request.global_settings.web2py_version)
+                    web2py_installed_version = parse_version(global_settings.web2py_version)
                     web2py_installed_datetime = web2py_installed_version[4] # datetime_index = 4
                     if web2py_installed_datetime >= datetime.datetime(2015, 1, 17, 0, 7, 4):
                         # Use http://www.postgis.org/docs/ST_SimplifyPreserveTopology.html
@@ -5831,6 +5836,8 @@ page.render('%(filename)s', {format: 'jpeg', quality: '100'});''' % \
                     except:
                         form.errors["wkt"] = current.messages.invalid_wkt
                         return
+                    else:
+                        form_vars.wkt = shape.wkt
                 else:
                     # Assume WKT
                     from shapely.wkt import loads as wkt_loads
@@ -5845,6 +5852,12 @@ page.render('%(filename)s', {format: 'jpeg', quality: '100'});''' % \
                         except:
                             form.errors["wkt"] = current.messages.invalid_wkt
                             return
+
+                    if shape.has_z:
+                        # Shapely export of WKT is 2D only
+                        form_vars.wkt = shape.wkt
+                        current.session.warning = current.T("Only 2D geometry stored as PostGIS cannot handle 3D geometries")
+
                 gis_feature_type = shape.type
                 if gis_feature_type == "Point":
                     form_vars.gis_feature_type = 1

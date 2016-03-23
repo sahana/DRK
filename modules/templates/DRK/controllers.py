@@ -254,22 +254,70 @@ $(document).ready(function(){
         return output
 
 # =============================================================================
-def update_transferability():
+class transferability(S3CustomController):
+    """ Custom controller to update transferability status """
+
+    def __call__(self):
+
+        auth = current.auth
+        ADMIN = auth.get_system_roles().ADMIN
+
+        if auth.s3_has_role(ADMIN):
+
+            T = current.T
+
+            form = FORM(H3(T("Check transferability for all current cases")),
+                        INPUT(_type="submit", _value=T("Update now"), _class="tiny primary button"),
+                        P("(%s)" % T("This process can take a couple of minutes")),
+                        )
+
+            if form.accepts(current.request.post_vars, current.session):
+
+                # Get default site
+                default_site = current.deployment_settings.get_org_default_site()
+
+                # Update transferability
+                result = update_transferability(site_id=default_site)
+                if result:
+                    msg = current.T("%(number)s transferable cases found") % {"number": result}
+                    current.session.confirmation = msg
+                else:
+                    msg = current.T("No transferable cases found")
+                    current.session.warning = msg
+
+                # Forward to list of transferable cases
+                redirect(URL(c = "dvr",
+                            f = "person",
+                            vars = {"closed": "0",
+                                    "dvr_case.transferable__belongs": "True",
+                                    "show_family_transferable": "1",
+                                    },
+                            ))
+
+            self._view(THEME, "transferability.html")
+            return {"form": form}
+
+        else:
+            auth.permission.fail()
+
+# =============================================================================
+def update_transferability(site_id=None):
     """
         Update transferability status of all cases, to be called either
         from scheduler task or manually through custom controller.
 
-        @todo: complete criteria
-        @todo: make a function of that custom controller class
         @todo: call from org_site_check task
+        @todo: check household transferability
     """
-
-    # @todo: check that we have admin permissions
 
     db = current.db
     s3db = current.s3db
 
     now = current.request.utcnow
+
+    from dateutil.relativedelta import relativedelta
+    TODAY = now.date()
+    ONE_YEAR_AGO = (now - relativedelta(years=1)).date()
 
     ptable = s3db.pr_person
     ctable = s3db.dvr_case
@@ -279,9 +327,36 @@ def update_transferability():
     ttable = s3db.dvr_case_appointment_type
     atable = s3db.dvr_case_appointment
 
+    # Appointment status "completed"
+    COMPLETED = 4
+
+    # Appointment statuses which override the requirement
+    NOT_REQUIRED = 7
+
     # Set transferable=False for all cases
     query = (ctable.deleted != True)
-    db(query).update(transferable = False)
+    db(query).update(transferable = False,
+                     household_transferable = False,
+                     )
+
+    # Get IDs of "Reported Transferable" and "Transfer" appointment types
+    query = ((ttable.name == "Reported Transferable") | \
+             (ttable.name == "Transfer")) & \
+            (ttable.deleted != True)
+    rows = db(query).select(ttable.id, limitby = (0, 2))
+    if rows:
+        transferability_complete = set(row.id for row in rows)
+    else:
+        transferability_complete = None
+
+    # Get IDs of closed case statuses
+    query = ((stable.is_closed == False) | (stable.is_closed == None)) & \
+            (stable.deleted != True)
+    rows = db(query).select(stable.id)
+    if rows:
+        OPEN = set(row.id for row in rows)
+    else:
+        OPEN = None
 
     # Define age groups (minimum age, maximum age, appointments, maximum absence)
     age_groups = {"children": (None, 15, "mandatory_children", None),
@@ -297,13 +372,25 @@ def update_transferability():
             utable.on(utable.id == rtable.shelter_unit_id),
             ]
 
+    # Add left join for "reported transferable" date
+    if transferability_complete:
+        tctable = atable.with_alias("transferability_complete")
+        tcjoin = tctable.on((tctable.person_id == ctable.person_id) & \
+                            (tctable.type_id.belongs(transferability_complete)) & \
+                            (tctable.deleted != True) & \
+                            (tctable.date != None) & \
+                            (tctable.date >= ONE_YEAR_AGO) & \
+                            (tctable.date <= TODAY) & \
+                            (tctable.status == COMPLETED))
+        left.append(tcjoin)
+
+    result = 0
     for age_group in age_groups:
 
         min_age, max_age, appointment_flag, maximum_absence = age_groups[age_group]
 
         # Translate Age Group => Date of Birth
         dob_query = (ptable.date_of_birth != None)
-        from dateutil.relativedelta import relativedelta
         if max_age:
             dob_min = now - relativedelta(years=max_age)
             dob_query &= (ptable.date_of_birth > dob_min)
@@ -315,6 +402,13 @@ def update_transferability():
         case_query = (ctable.deleted != True) & \
                      ((ctable.archived == False) | \
                       (ctable.archived == None))
+        if OPEN:
+            # Check only open cases
+            case_query &= ctable.status_id.belongs(OPEN)
+
+        # Check for site
+        if site_id:
+            case_query &= (ctable.site_id == site_id)
 
         # Case must not have a non-transferable status
         case_query &= (stable.is_not_transferable == False) | \
@@ -328,7 +422,10 @@ def update_transferability():
         # Add date-of-birth query
         case_query &= dob_query
 
-        # @todo: check that we do not yet have a "reported transferable date"
+        # Check that transferability management is not complete
+        # (=no completed appointment for "Reported Transferable" or "Transfer")
+        if transferability_complete:
+            case_query &= (tctable.id == None)
 
         # Filter by presence if required
         if maximum_absence is not None:
@@ -346,12 +443,11 @@ def update_transferability():
             case_query &= presence_query
 
         # Select all cases for this age group:
-        cases = db(case_query).select(ctable.id,
-                                      left = left,
-                                      )
+        cases = db(case_query).select(ctable.id, left = left)
         case_ids = set(case.id for case in cases)
 
         if case_ids:
+
             # Check for mandatory appointments
             query = ctable.id.belongs(case_ids)
             aleft = []
@@ -367,16 +463,6 @@ def update_transferability():
 
             if mandatory_appointments:
 
-                TODAY = now.date()
-                ONE_YEAR_AGO = (now - relativedelta(years=1)).date()
-
-                # Appointment statuses which do not count as valid dates
-                MISSED = 5
-                CANCELLED = 6
-
-                # Appointment statuses which override the requirement
-                NOT_REQUIRED = 7
-
                 # Join the valid appointment dates
                 for appointment_type_id in mandatory_appointments:
 
@@ -386,8 +472,7 @@ def update_transferability():
                     join = atable_.on((atable_.person_id == ctable.person_id) & \
                                       (atable_.type_id == appointment_type_id) & \
                                       (atable_.deleted != True) & \
-                                      (((atable_.status != MISSED) & \
-                                        (atable_.status != CANCELLED) & \
+                                      (((atable_.status == COMPLETED) & \
                                         (atable_.date != None) & \
                                         (atable_.date >= ONE_YEAR_AGO) & \
                                         (atable_.date <= TODAY)) | \
@@ -400,6 +485,83 @@ def update_transferability():
                 case_ids = set(case.id for case in cases)
 
             # Set the matching cases transferable=True
-            db(ctable.id.belongs(case_ids)).update(transferable=True)
+            success = db(ctable.id.belongs(case_ids)).update(transferable=True)
+            if success:
+                result += success
+
+    # Check transferability of families
+    gtable = s3db.pr_group
+    mtable = s3db.pr_group_membership
+    # Family = Case Group (group type 7)
+    query = (gtable.group_type == 7) & \
+            (gtable.deleted != True) & \
+            (ctable.id != None)
+
+    # Find all case groups which have no currently transferable member
+    left = [mtable.on((mtable.group_id == gtable.id) & \
+                      (mtable.deleted != True)),
+            ctable.on((ctable.person_id == mtable.person_id) &
+                      (ctable.transferable == True)),
+            ]
+    members = ctable.id.count()
+    rows = db(query).select(gtable.id,
+                            groupby = gtable.id,
+                            having = (members == 0),
+                            left = left,
+                            )
+    group_ids = set(row.id for row in rows)
+
+    # Add all case groups which have at least one non-transferable member
+    open_case = (ctable.archived != True) & \
+                (ctable.deleted != True)
+    if OPEN:
+        open_case = (ctable.status_id.belongs(OPEN)) & open_case
+
+    if group_ids:
+        query &= (~(gtable.id.belongs(group_ids)))
+    left = [mtable.on((mtable.group_id == gtable.id) & \
+                      (mtable.deleted != True)),
+            ctable.on((ctable.person_id == mtable.person_id) & \
+                      open_case & \
+                      ((ctable.transferable == False) | \
+                       (ctable.transferable == None))),
+            ]
+    if transferability_complete:
+        left.append(tcjoin)
+        query &= (tctable.id == None)
+
+    rows = db(query).select(gtable.id,
+                            groupby = gtable.id,
+                            left = left,
+                            )
+    group_ids |= set(row.id for row in rows)
+
+    # Find all cases which do not belong to any of these
+    # non-transferable case groups, but either belong to
+    # another case group or are transferable themselves
+    ftable = mtable.with_alias("family")
+    left = [mtable.on((mtable.person_id == ctable.person_id) & \
+                      (mtable.group_id.belongs(group_ids)) & \
+                      (mtable.deleted != True)),
+            gtable.on((ftable.person_id == ctable.person_id) & \
+                      (ftable.deleted != True) & \
+                      (gtable.id == ftable.group_id) & \
+                      (gtable.group_type == 7)),
+            ]
+    query = (mtable.id == None) & (ctable.deleted != True)
+    families = gtable.id.count()
+    required = ((families > 0) | (ctable.transferable == True))
+    rows = db(query).select(ctable.id,
+                            groupby = ctable.id,
+                            having = required,
+                            left = left,
+                            )
+
+    # ...and set them household_transferable=True:
+    case_ids = set(row.id for row in rows)
+    if case_ids:
+        db(ctable.id.belongs(case_ids)).update(household_transferable=True)
+
+    return result
 
 # END =========================================================================

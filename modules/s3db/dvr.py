@@ -131,10 +131,13 @@ class DVRCaseModel(S3Model):
                                                            ),
                                          ),
                            ),
-                     Field("code", notnull=True, unique=True,
+                     Field("code", length=64, notnull=True, unique=True,
                            label = T("Status Code"),
-                           length = 64,
-                           requires = IS_NOT_EMPTY(),
+                           requires = [IS_NOT_EMPTY(),
+                                       IS_NOT_ONE_OF(db,
+                                                     "%s.code" % tablename,
+                                                     ),
+                                       ],
                            comment = DIV(_class="tooltip",
                                          _title="%s|%s" % (T("Status Code"),
                                                            T("A unique code to identify the status."),
@@ -258,9 +261,6 @@ class DVRCaseModel(S3Model):
                      Field("reference",
                            label = T("Case Number"),
                            ),
-                     person_id(empty = False,
-                               ondelete = "CASCADE",
-                               ),
                      FieldS3("case_type_id", "reference dvr_case_type",
                              label = T("Case Type"),
                              represent = case_type_represent,
@@ -332,9 +332,20 @@ class DVRCaseModel(S3Model):
                            readable = False,
                            writable = False,
                            ),
+                     # "transferable" indicates whether this case is
+                     # ready for transfer (=workflow is complete)
                      Field("transferable", "boolean",
                            default = False,
                            label = T("Transferable"),
+                           represent = s3_yes_no_represent,
+                           readable = manage_transferability,
+                           writable = manage_transferability,
+                           ),
+                     # "household transferable" indicates whether all
+                     # open cases in the case group are ready for transfer
+                     Field("household_transferable", "boolean",
+                           default = False,
+                           label = T("Household Transferable"),
                            represent = s3_yes_no_represent,
                            readable = manage_transferability,
                            writable = manage_transferability,
@@ -1216,7 +1227,11 @@ class DVRCaseAppointmentModel(S3Model):
         tablename = "dvr_case_appointment_type"
         define_table(tablename,
                      Field("name", length=64, notnull=True, unique=True,
-                           requires = IS_NOT_EMPTY(),
+                           requires = [IS_NOT_EMPTY(),
+                                       IS_NOT_ONE_OF(db,
+                                                     "%s.name" % tablename,
+                                                     ),
+                                       ],
                            ),
                      Field("active", "boolean",
                            default = True,
@@ -1344,20 +1359,29 @@ class DVRCaseAppointmentModel(S3Model):
                         action = dvr_ManageAppointments,
                         )
 
+        configure(tablename,
+                  deduplicate = S3Duplicate(primary=("person_id",
+                                                     "type_id",
+                                                     ),
+                                            ),
+                  )
+
         # @todo: onaccept to change status "planning" to "planned" if a date
         #        has been entered, and vice versa
 
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return {"dvr_appointment_status_opts": appointment_status_opts,
+                }
 
     # -------------------------------------------------------------------------
     @staticmethod
     def defaults():
         """ Safe defaults for names in case the module is disabled """
 
-        return {}
+        return {"dvr_appointment_status_opts": {},
+                }
 
 # =============================================================================
 class DVRCaseBeneficiaryModel(S3Model):

@@ -52,7 +52,7 @@ def config(settings):
     # Restrict the Location Selector to just certain countries
     # NB This can also be over-ridden for specific contexts later
     # e.g. Activities filtered to those of parent Project
-    #settings.gis.countries = ("US",)
+    settings.gis.countries = ("DE",)
     # Uncomment to display the Map Legend as a floating DIV
     settings.gis.legend = "float"
     # Uncomment to Disable the Postcode selector in the LocationSelector
@@ -65,6 +65,8 @@ def config(settings):
     # - move into customise fn if also supporting other polygons
     settings.gis.precision = 5
     settings.gis.simplify_tolerance = 0
+    settings.gis.bbox_min_size = 0.001
+    #settings.gis.bbox_offset = 0.007
 
     # L10n settings
     # Languages used in the deployment (used for Language Toolbar & GIS Locations)
@@ -366,6 +368,21 @@ def config(settings):
         return error, warning
 
     # -------------------------------------------------------------------------
+    def org_site_check(site_id):
+        """ Custom tasks for scheduled site checks """
+
+        # Update transferability
+        from controllers import update_transferability
+        result = update_transferability(site_id=site_id)
+
+        # Log the result
+        msg = "Update Transferability: " \
+              "%s transferable cases found for site %s" % (result, site_id)
+        current.log.info(msg)
+
+    settings.org.site_check = org_site_check
+
+    # -------------------------------------------------------------------------
     def customise_auth_user_resource(r, resource):
 
         current.db.auth_user.organisation_id.default = settings.get_org_default_organisation()
@@ -393,10 +410,36 @@ def config(settings):
                                        site_check_out = site_check_out,
                                        )
             else:
-                # Security can't do anything else but check-in
                 has_role = current.auth.s3_has_role
                 if has_role("SECURITY") and not has_role("ADMIN"):
-                   current.auth.permission.fail()
+                    # Security can't do anything else but check-in
+                    current.auth.permission.fail()
+
+                if r.method == "profile":
+                    # Add PoI layer to the Map
+                    s3db = current.s3db
+                    ftable = s3db.gis_layer_feature
+                    query = (ftable.controller == "gis") & \
+                            (ftable.function == "poi")
+                    layer = current.db(query).select(ftable.layer_id,
+                                                     limitby=(0, 1)
+                                                     ).first()
+                    try:
+                        layer_id = layer.layer_id
+                    except:
+                        # No suitable prepop found
+                        pass
+                    else:
+                        pois = dict(active = True,
+                                    layer_id = layer_id,
+                                    name = current.T("Buildings"),
+                                    id = "profile-header-%s-%s" % ("gis_poi", r.id),
+                                    )
+                        profile_layers = s3db.get_config("cr_shelter", "profile_layers")
+                        profile_layers += (pois,)
+                        s3db.configure("cr_shelter",
+                                       profile_layers = profile_layers,
+                                       )
 
             if r.component_name == "shelter_unit":
                 # Expose "transitory" flag for housing units
@@ -687,6 +730,13 @@ def config(settings):
                 else:
                     absence_field = None
 
+                # List modes
+                check_overdue = False
+                show_family_transferable = False
+
+                # Labels
+                FAMILY_TRANSFERABLE = T("Family Transferable")
+
                 if not r.record:
                     overdue = r.get_vars.get("overdue")
                     if overdue:
@@ -712,6 +762,11 @@ def config(settings):
                             query = not_checked_out | \
                                     checked_out & (checkout_date >= due_date)
                         resource.add_filter(query)
+                        check_overdue = True
+
+                    show_family_transferable = r.get_vars.get("show_family_transferable")
+                    if show_family_transferable == "1":
+                        show_family_transferable = True
 
                 if not r.component:
 
@@ -733,17 +788,6 @@ def config(settings):
                     field.default = r.utcnow + relativedelta(years=5)
                     # Not used currently:
                     #field.readable = field.writable = True
-
-                    # Customize label and tooltip for "household size"
-                    field = ctable.household_size
-                    FAMILY_MEMBERS = T("Family Members")
-                    field.label = FAMILY_MEMBERS
-                    from gluon.html import DIV
-                    field.comment = DIV(_class="tooltip",
-                                        _title="%s|%s" % (FAMILY_MEMBERS,
-                                                          T("The total number of family members including this person."),
-                                                          ),
-                                        )
 
                     #default_organisation = current.auth.root_org()
                     default_organisation = settings.get_org_default_organisation()
@@ -918,8 +962,6 @@ def config(settings):
                                         "person_details.nationality",
                                         "person_details.occupation",
                                         "person_details.marital_status",
-                                        # @todo: expose in next release:
-                                        #"dvr_case.household_size",
                                         S3SQLInlineComponent(
                                                 "contact",
                                                 fields = [("", "value"),
@@ -971,6 +1013,18 @@ def config(settings):
                             #dob_filter.operator = ["eq"]
                             filter_widgets.insert(1, dob_filter)
 
+                            # Add filter for family transferability
+                            if show_family_transferable:
+                                ft_filter = S3OptionsFilter("dvr_case.household_transferable",
+                                                            label = FAMILY_TRANSFERABLE,
+                                                            options = {True: T("Yes"),
+                                                                       False: T("No"),
+                                                                       },
+                                                            cols = 2,
+                                                            hidden = True,
+                                                            )
+                                filter_widgets.append(ft_filter)
+
                             # Add filter for registration date
                             reg_filter = S3DateFilter("dvr_case.date",
                                                       hidden = True,
@@ -1007,11 +1061,20 @@ def config(settings):
                                    "dvr_case.status_id",
                                    (T("Shelter"), "shelter_registration.shelter_unit_id"),
                                    ]
+
+                    # Add fields for managing transferability
+                    if settings.get_dvr_manage_transferability() and not check_overdue:
+                        transf_fields = ["dvr_case.transferable",
+                                         (T("Size of Family"), "dvr_case.household_size"),
+                                         ]
+                        if show_family_transferable:
+                            transf_fields.append((FAMILY_TRANSFERABLE,
+                                                  "dvr_case.household_transferable"))
+                        list_fields[-1:-1] = transf_fields
+
+                    # Days of absence (virtual field)
                     if absence_field:
                         list_fields.append(absence_field)
-
-                    # @todo: expose in next release
-                    #list_fields.append((FAMILY_MEMBERS, "dvr_case.household_size"))
 
                     if r.representation == "xls":
 
@@ -1059,6 +1122,12 @@ def config(settings):
                                                               }
                                                  },
                                                 ),
+                                            pr_group = {"name": "family",
+                                                        "link": "pr_group_membership",
+                                                        "joinby": "person_id",
+                                                        "key": "group_id",
+                                                        "filterby": {"group_type": 7},
+                                                        },
                                             )
 
                         list_fields += [# Date of the GU (GU = Health Screening, case appointments)
@@ -1076,7 +1145,10 @@ def config(settings):
                                         "shelter_registration.check_in_date",
                                         # Last Check-out (if checked-out)
                                         "shelter_registration.check_out_date",
+                                        # Person UUID
                                         ("UUID", "uuid"),
+                                        # Family Record ID
+                                        (T("Family ID"), "family.id"),
                                         ]
                     configure(list_fields = list_fields)
 
@@ -1109,7 +1181,7 @@ def config(settings):
         s3.postp = custom_postp
 
         # Custom rheader tabs
-        if current.request.controller != "default":
+        if current.request.controller == "dvr":
             attr = dict(attr)
             attr["rheader"] = drk_dvr_rheader
 
@@ -1167,6 +1239,8 @@ def config(settings):
                                "person_id$date_of_birth",
                                "person_id$gender",
                                (ROLE, "role_id"),
+                               (T("Case Status"), "person_id$dvr_case.status_id"),
+                               "person_id$dvr_case.transferable",
                                ]
                 # Retain group_id in list_fields if added in standard prep
                 lfields = resource.get_config("list_fields")
@@ -1478,6 +1552,7 @@ def config(settings):
                                         cols = 3,
                                         ),
                         S3OptionsFilter("status",
+                                        options = s3db.dvr_appointment_status_opts,
                                         default = 2,
                                         ),
                         S3DateFilter("date",
@@ -1509,6 +1584,10 @@ def config(settings):
                                "status",
                                "comments",
                                ]
+
+                if r.representation == "xls":
+                    # Include Person UUID
+                    list_fields.append(("UUID", "person_id$uuid"))
 
                 resource.configure(list_fields = list_fields,
                                    insertable = False,
@@ -1924,6 +2003,9 @@ def drk_dvr_rheader(r, tabs=[]):
                 case = resource.select(["dvr_case.status_id",
                                         "dvr_case.status_id$code",
                                         "dvr_case.archived",
+                                        "dvr_case.household_size",
+                                        "dvr_case.transferable",
+                                        #"dvr_case.household_transferable",
                                         #"case_flag_case.flag_id$name",
                                         "first_name",
                                         "last_name",
@@ -1936,15 +2018,26 @@ def drk_dvr_rheader(r, tabs=[]):
                     case = case[0]
                     archived = case["_row"]["dvr_case.archived"]
                     case_status = lambda row: case["dvr_case.status_id"]
+                    transferable = lambda row: case["dvr_case.transferable"]
+                    household_size = lambda row: case["dvr_case.household_size"]
+                    #household_transferable = lambda row: case["dvr_case.household_transferable"]
                     eligible = lambda row: ""
                     name = lambda row: s3_fullname(row)
                 else:
                     # Target record exists, but doesn't match filters
                     return None
 
-                rheader_fields = [[(T("ID"), "pe_label"), (T("Case Status"), case_status)],
-                                  [(T("Name"), name), (T("Checked-out"), "absence")],
-                                  ["date_of_birth"],
+                rheader_fields = [[(T("ID"), "pe_label"),
+                                   (T("Case Status"), case_status),
+                                   (T("Transferable"), transferable),
+                                   ],
+                                  [(T("Name"), name),
+                                   (T("Size of Family"), household_size),
+                                   #(T("Family Transferable"), household_transferable),
+                                   ],
+                                  ["date_of_birth",
+                                   (T("Checked-out"), "absence"),
+                                   ],
                                   ]
 
                 if archived:

@@ -145,6 +145,8 @@ class S3Config(Storage):
         self.inv = Storage()
         self.irs = Storage()
         self.L10n = Storage()
+        # Allow templates to append rather than replace
+        self.L10n.languages = {"en": "English"}
         self.log = Storage()
         self.mail = Storage()
         self.member = Storage()
@@ -996,12 +998,21 @@ class S3Config(Storage):
         return self.gis.get("api_google",
                             "ABQIAAAAgB-1pyZu7pKAZrMGv3nksRTpH3CbXHjuCVmaTc5MkkU4wO1RRhQWqp1VGwrG8yPE2KhLCPYhD7itFw")
 
-    def get_gis_api_yahoo(self):
+    def get_gis_bbox_min_size(self):
         """
-            API key for Yahoo
-            - deprecated
+            Minimum size for BBOX around Features on Map
+            - so that there is always some Map around a Point
+
+            Value is in degrees
         """
-        return self.gis.get("api_yahoo")
+        return self.gis.get("bbox_min_size", 0.05)
+
+    def get_gis_bbox_inset(self):
+        """
+            BBOX inset around Features on Map
+            - so that ones on the edge don't get cut-off
+        """
+        return self.gis.get("bbox_inset", 0.007)
 
     def get_gis_building_name(self):
         """
@@ -1414,35 +1425,7 @@ class S3Config(Storage):
         return self.L10n.get("display_toolbar", True)
 
     def get_L10n_languages(self):
-        return self.L10n.get("languages", OrderedDict([("ar", "العربية"),
-                                                       ("zh-cn", "中文 (简体)"),
-                                                       ("zh-tw", "中文 (繁體)"),
-                                                       ("bs", "Bosanski"),
-                                                       ("en", "English"),
-                                                       ("fr", "Français"),
-                                                       ("de", "Deutsch"),
-                                                       ("el", "ελληνικά"),
-                                                       ("es", "Español"),
-                                                       ("it", "Italiano"),
-                                                       ("ja", "日本語"),
-                                                       ("km", "ភាសាខ្មែរ"),         # Khmer
-                                                       ("ko", "한국어"),
-                                                       ("mn", "Монгол хэл"),   # Mongolian
-                                                       ("my", "မြန်မာစာ"),        # Burmese
-                                                       ("ne", "नेपाली"),           # Nepali
-                                                       ("prs", "دری"),         # Dari
-                                                       ("ps", "پښتو"),         # Pashto
-                                                       ("pt", "Português"),
-                                                       ("pt-br", "Português (Brasil)"),
-                                                       ("ru", "русский"),
-                                                       #("si", "සිංහල"),                # Sinhala
-                                                       #("ta", "தமிழ்"),               # Tamil
-                                                       #("th", "ภาษาไทย"),        # Thai
-                                                       ("tl", "Tagalog"),
-                                                       ("tr", "Türkçe"),
-                                                       ("ur", "اردو"),
-                                                       ("vi", "Tiếng Việt"),
-                                                       ]))
+        return self.L10n.get("languages")
 
     def get_L10n_languages_readonly(self):
         return self.L10n.get("languages_readonly", True)
@@ -3506,6 +3489,12 @@ class S3Config(Storage):
             Whether volunteers can be assigned to Sites
         """
         return self.org.get("site_volunteers", False)
+
+    def get_org_site_check(self):
+        """
+            Get custom tasks for scheduled site checks
+        """
+        return self.org.get("site_check")
 
     def get_org_summary(self):
         """

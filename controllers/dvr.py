@@ -210,6 +210,18 @@ def person():
                                     ),
                     ]
 
+                # Add filter for transferability if relevant for deployment
+                if settings.get_dvr_manage_transferability():
+                    filter_widgets.append(
+                        S3OptionsFilter("dvr_case.transferable",
+                                        options = {True: T("Yes"),
+                                                   False: T("No"),
+                                                   },
+                                        cols = 2,
+                                        hidden = True,
+                                        )
+                        )
+
                 resource.configure(crud_form = crud_form,
                                    filter_widgets = filter_widgets,
                                    )
@@ -303,10 +315,8 @@ def group_membership():
             elif len(group_ids) == 1:
                 field = table.group_id
                 field.default = group_id
-                # If we have only one relevant case, then hide the group ID
-                # in create-forms:
-                if not r.id:
-                    field.readable = field.writable = False
+                # If we have only one relevant case, then hide the group ID:
+                field.readable = field.writable = False
             elif len(group_ids) > 1:
                 # Show the case ID in list fields if there is more than one
                 # relevant case
@@ -423,7 +433,30 @@ def allowance():
 def case_appointment():
     """ Appointments: RESTful CRUD Controller """
 
-    return s3_rest_controller()
+    def prep(r):
+
+        if r.method == "import":
+            # Allow deduplication of persons by pe_label: existing
+            # pe_labels would be caught by IS_NOT_ONE_OF before
+            # reaching the deduplicator, so remove the validator here:
+            ptable = s3db.pr_person
+            ptable.pe_label.requires = None
+        return True
+    s3.prep = prep
+
+    table = s3db.dvr_case_appointment
+
+    return s3_rest_controller(csv_extra_fields=[{"label": "Appointment Type",
+                                                 "field": table.type_id,
+                                                 },
+                                                {"label": "Appointment Date",
+                                                 "field": table.date,
+                                                 },
+                                                {"label": "Appointment Status",
+                                                 "field": table.status,
+                                                 },
+                                                ],
+                              )
 
 # -----------------------------------------------------------------------------
 def case_appointment_type():

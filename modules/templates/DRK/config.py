@@ -383,7 +383,7 @@ def config(settings):
     settings.org.site_check = org_site_check
 
     # -------------------------------------------------------------------------
-    def customise_auth_user_resource(r, resource):
+    def customise_auth_user_resource(r, tablename):
 
         current.db.auth_user.organisation_id.default = settings.get_org_default_organisation()
 
@@ -477,6 +477,24 @@ def config(settings):
     settings.customise_cr_shelter_controller = customise_cr_shelter_controller
 
     # -------------------------------------------------------------------------
+    def customise_cr_shelter_registration_resource(r, tablename):
+
+        table = current.s3db.cr_shelter_registration
+        field = table.shelter_unit_id
+
+        # Filter to available housing units
+        from gluon import IS_EMPTY_OR
+        from s3 import IS_ONE_OF
+        field.requires = IS_EMPTY_OR(IS_ONE_OF(current.db, "cr_shelter_unit.id",
+                                               field.represent,
+                                               filterby = "status",
+                                               filter_opts = (1,),
+                                               orderby="shelter_id",
+                                               ))
+
+    settings.customise_cr_shelter_registration_resource = customise_cr_shelter_registration_resource
+
+    # -------------------------------------------------------------------------
     def customise_cr_shelter_registration_controller(**attr):
         """
             Shelter Registration controller is just used
@@ -542,6 +560,8 @@ def config(settings):
     settings.dvr.household_size = "auto"
     # Uncomment this to expose flags to mark appointment types as mandatory
     settings.dvr.mandatory_appointments = True
+    # Uncomment this to allow cases to belong to multiple case groups ("households")
+    #settings.dvr.multiple_case_groups = True
 
     # -------------------------------------------------------------------------
     def customise_dvr_home():
@@ -829,9 +849,12 @@ def config(settings):
                                 from s3 import IS_ONE_OF
                                 field.requires = IS_EMPTY_OR(
                                                     IS_ONE_OF(dbset, "cr_shelter_unit.id",
-                                                            field.represent,
-                                                            sort=True,
-                                                            ))
+                                                              field.represent,
+                                                              # Only available units:
+                                                              filterby = "status",
+                                                              filter_opts = (1,),
+                                                              sort=True,
+                                                              ))
                         else:
                             # Limit sites to default_organisation
                             field = ctable.site_id
@@ -1077,51 +1100,41 @@ def config(settings):
                         list_fields.append(absence_field)
 
                     if r.representation == "xls":
-
                         # Extra list_fields for XLS export
-                        atypes = {"GU": None,
-                                  "X-Ray": None,
-                                  "Reported Transferable": None,
-                                  "Transfer": None,
-                                  }
-                        attable = s3db.dvr_case_appointment_type
 
-                        query = attable.name.belongs(atypes.keys())
+                        # Add appointment dates
+                        atypes = ["GU",
+                                  "X-Ray",
+                                  "Reported Transferable",
+                                  "Transfer",
+                                  "Sent to RP",
+                                  ]
+                        COMPLETED = 4
+                        afields = []
+                        attable = s3db.dvr_case_appointment_type
+                        query = attable.name.belongs(atypes)
                         rows = db(query).select(attable.id,
                                                 attable.name,
                                                 )
+                        add_components = s3db.add_components
                         for row in rows:
-                            atypes[row.name] = row.id
+                            type_id = row.id
+                            name = "appointment%s" % type_id
+                            hook = {"name": name,
+                                    "joinby": "person_id",
+                                    "filterby": {"type_id": type_id,
+                                                 "status": COMPLETED,
+                                                 },
+                                    }
+                            add_components("pr_person",
+                                           dvr_case_appointment = hook,
+                                           )
+                            afields.append((T(row.name), "%s.date" % name))
 
-                        # Filtered Components
-                        COMPLETED = 4
+                        list_fields.extend(afields)
+
+                        # Add family key
                         s3db.add_components("pr_person",
-                                            dvr_case_appointment = (
-                                                {"name": "gu",
-                                                 "joinby": "person_id",
-                                                 "filterby": {"type_id": atypes["GU"],
-                                                              "status": COMPLETED,
-                                                              },
-                                                 },
-                                                {"name": "xray",
-                                                 "joinby": "person_id",
-                                                 "filterby": {"type_id": atypes["X-Ray"],
-                                                              "status": COMPLETED,
-                                                              }
-                                                 },
-                                                {"name": "transferable",
-                                                 "joinby": "person_id",
-                                                 "filterby": {"type_id": atypes["Reported Transferable"],
-                                                              "status": COMPLETED,
-                                                              }
-                                                 },
-                                                {"name": "transfer",
-                                                 "joinby": "person_id",
-                                                 "filterby": {"type_id": atypes["Transfer"],
-                                                              "status": COMPLETED,
-                                                              }
-                                                 },
-                                                ),
                                             pr_group = {"name": "family",
                                                         "link": "pr_group_membership",
                                                         "joinby": "person_id",
@@ -1130,20 +1143,13 @@ def config(settings):
                                                         },
                                             )
 
-                        list_fields += [# Date of the GU (GU = Health Screening, case appointments)
-                                        (T("GU"), "gu.date"),
-                                        # Date of the X-Ray (case appointments)
-                                        (T("X-Ray"), "xray.date"),
-                                        # Date when Reported Transferable (case appointments)
-                                        (T("Reported Transferable"), "transferable.date"),
-                                        # Date of the Transfer (case appointments)
-                                        (T("Transfer"), "transfer.date"),
-                                        # Housing Unit (done in interactive now as well)
-                                        #"shelter_registration.shelter_unit_id",
-                                        # Last Check-in (if checked-in)
-                                        (T("Registration Status"), "shelter_registration.registration_status"),
+                        list_fields += [# Current check-in/check-out status
+                                        (T("Registration Status"),
+                                         "shelter_registration.registration_status",
+                                         ),
+                                        # Last Check-in date
                                         "shelter_registration.check_in_date",
-                                        # Last Check-out (if checked-out)
+                                        # Last Check-out date
                                         "shelter_registration.check_out_date",
                                         # Person UUID
                                         ("UUID", "uuid"),
@@ -1526,7 +1532,7 @@ def config(settings):
             if not r.component:
 
                 if r.interactive and not r.id:
-                    # Custom filter widgets
+                    # Add EO Number as component so it can be filtered by
                     s3db.add_components("pr_person",
                                         pr_person_tag = {"name": "eo_number",
                                                          "joinby": "person_id",
@@ -1536,6 +1542,7 @@ def config(settings):
                                                          },
                                         )
 
+                    # Custom filter widgets
                     from s3 import S3TextFilter, S3OptionsFilter, S3DateFilter, s3_get_filter_opts
                     filter_widgets = [
                         S3TextFilter(["person_id$pe_label",
@@ -1557,14 +1564,30 @@ def config(settings):
                                         ),
                         S3DateFilter("date",
                                      ),
+                        S3OptionsFilter("person_id$dvr_case.status_id$is_closed",
+                                        cols = 2,
+                                        default = False,
+                                        #hidden = True,
+                                        label = T("Case Closed"),
+                                        options = {True: T("Yes"),
+                                                   False: T("No"),
+                                                   },
+                                        ),
+                        S3TextFilter(["person_id$pe_label"],
+                                     label = T("IDs"),
+                                     match_any = True,
+                                     hidden = True,
+                                     comment = T("Search for multiple IDs (separated by blanks)"),
+                                     ),
                         ]
+
                     resource.configure(filter_widgets = filter_widgets)
 
                 # Default filter today's and tomorrow's appointments
                 from s3 import s3_set_default_filter
                 now = current.request.utcnow
                 today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                tomorrow = today + datetime.timedelta(days=2)
+                tomorrow = today + datetime.timedelta(days=1)
                 s3_set_default_filter("~.date",
                                       {"ge": today, "le": tomorrow},
                                       tablename = "dvr_case_appointment",

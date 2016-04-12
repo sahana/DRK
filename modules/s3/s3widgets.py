@@ -2850,8 +2850,11 @@ class S3GroupedOptionsWidget(FormWidget):
 
         # Add tooltips
         items = []
+        T = current.T
         for key, label in group_items:
-            tooltip = helptext.get(key, None)
+            tooltip = helptext.get(key)
+            if tooltip:
+                tooltip = s3_str(T(tooltip))
             item = (key, label, key in values, tooltip)
             items.append(item)
 
@@ -8742,6 +8745,7 @@ class ICON(I):
             "responsibility": "icon-briefcase",
             "rss": "icon-rss",
             "sent": "icon-ok",
+            "settings": "icon-wrench",
             "site": "icon-home",
             "skype": "icon-skype",
             "star": "icon-star",
@@ -8811,6 +8815,7 @@ class ICON(I):
             #"responsibility": "fa-briefcase",
             #"rss": "fa-rss",
             #"sent": "fa-check",
+            #"settings": "fa-wrench",
             #"site": "fa-home",
             #"skype": "fa-skype",
             #"star": "fa-star",
@@ -8877,6 +8882,7 @@ class ICON(I):
             "responsibility": "fi-sheriff-badge",
             "rss": "fi-rss",
             "sent": "fi-check",
+            "settings": "fi-wrench",
             "site": "fi-home",
             "skype": "fi-social-skype",
             "star": "fi-star",

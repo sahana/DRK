@@ -600,8 +600,12 @@ def alert():
                 alert_id = request.args(0)
                 # Check for prepopulate
                 if alert_id:
+                    atable = r.table
                     itable.web.default = settings.get_base_public_url()+\
                                          URL(c="cap", f="alert", args=alert_id)
+                    row = db(atable.id == alert_id).select(atable.event_type_id,
+                                                           limitby=(0, 1)).first()
+                    itable.event_type_id.default = row.event_type_id
 
                 if r.record.approved_by is not None:
                     # Once approved, don't allow info segment to edit
@@ -609,7 +613,7 @@ def alert():
                     s3db.configure("cap_info",
                                    deletable = False,
                                    editable = False,
-                                   insertable=False,
+                                   insertable = False,
                                    )
                 if settings.get_cap_restrict_fields():
                     if r.record.msg_type in ("Update", "Cancel", "Error"):
@@ -734,6 +738,9 @@ def alert():
                     row_clone["alert_id"] = lastid
                     row_clone["template_info_id"] = row.id
                     row_clone["is_template"] = False
+                    row_clone["effective"] = request.utcnow
+                    row_clone["expires"] = s3db.cap_expiry_date()
+                    row_clone["sender_name"] = s3db.cap_sender_name()
                     itable.insert(**row_clone)
 
                 # Clone all cap_resource entries from the alert template
@@ -917,7 +924,7 @@ def template():
         atable.status.readable = atable.status.writable = False
 
         if r.component_name == "info":
-            itable = db.cap_info
+            itable = r.component.table
             for f in ("event",
                       "urgency",
                       "certainty",
@@ -940,6 +947,9 @@ def template():
             if alert_id:
                 itable.web.default = settings.get_base_public_url()+\
                                      URL(c="cap", f="alert", args=alert_id)
+                row = db(atable.id == alert_id).select(atable.event_type_id,
+                                                       limitby=(0, 1)).first()
+                itable.event_type_id.default = row.event_type_id
 
         elif r.component_name == "resource":
             rtable = r.component.table

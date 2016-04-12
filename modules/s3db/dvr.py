@@ -36,6 +36,7 @@ __all__ = ("DVRCaseModel",
            "DVRCaseBeneficiaryModel",
            "DVRCaseEconomyInformationModel",
            "DVRCaseAllowanceModel",
+           "DVRCaseEventModel",
            "dvr_case_default_status",
            "dvr_case_status_filter_opts",
            "dvr_case_household_size",
@@ -90,8 +91,8 @@ class DVRCaseModel(S3Model):
                            ),
                      # Enable in template if/when org-specific
                      # case types are required:
-                     self.org_organisation_id(readable=False,
-                                              writable=False,
+                     self.org_organisation_id(readable = False,
+                                              writable = False,
                                               ),
                      s3_comments(),
                      *s3_meta_fields())
@@ -125,10 +126,10 @@ class DVRCaseModel(S3Model):
                            default = 1,
                            label = T("Workflow Position"),
                            requires = IS_INT_IN_RANGE(1, None),
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Workflow Position"),
-                                                           T("Rank when ordering cases by status."),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Workflow Position"),
+                                                             T("Rank when ordering cases by status"),
+                                                             ),
                                          ),
                            ),
                      Field("code", length=64, notnull=True, unique=True,
@@ -138,10 +139,10 @@ class DVRCaseModel(S3Model):
                                                      "%s.code" % tablename,
                                                      ),
                                        ],
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Status Code"),
-                                                           T("A unique code to identify the status."),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Status Code"),
+                                                             T("A unique code to identify the status"),
+                                                             ),
                                          ),
                            ),
                      Field("name",
@@ -153,10 +154,10 @@ class DVRCaseModel(S3Model):
                            default = False,
                            label = T("Default Status"),
                            represent = s3_yes_no_represent,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Default Status"),
-                                                           T("This status applies for new cases unless specified otherwise."),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Default Status"),
+                                                             T("This status applies for new cases unless specified otherwise"),
+                                                             ),
                                          ),
                            ),
                      Field("is_closed", "boolean",
@@ -165,7 +166,7 @@ class DVRCaseModel(S3Model):
                            represent = s3_yes_no_represent,
                            comment = DIV(_class="tooltip",
                                          _title="%s|%s" % (T("Case Closed"),
-                                                           T("Cases with this status are closed."),
+                                                           T("Cases with this status are closed"),
                                                            ),
                                          ),
                            ),
@@ -175,17 +176,17 @@ class DVRCaseModel(S3Model):
                            represent = s3_yes_no_represent,
                            readable = manage_transferability,
                            writable = manage_transferability,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Not Transferable"),
-                                                           T("Cases with this status are not transferable."),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Not Transferable"),
+                                                             T("Cases with this status are not transferable"),
+                                                             ),
                                          ),
                            ),
                      s3_comments(
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Comments"),
-                                                           T("Describe the meaning, reasons and potential consequences of this status."),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Comments"),
+                                                             T("Describe the meaning, reasons and potential consequences of this status"),
+                                                             ),
                                          ),
                            ),
                      *s3_meta_fields())
@@ -206,8 +207,8 @@ class DVRCaseModel(S3Model):
 
         # Table configuration
         configure(tablename,
-                  # Automatic since unique=True
-                  #deduplicate = S3Duplicate(primary = ("code",)),
+                  # Allow imports to change the status code:
+                  deduplicate = S3Duplicate(primary = ("name",)),
                   onaccept = self.case_status_onaccept,
                   )
 
@@ -358,7 +359,7 @@ class DVRCaseModel(S3Model):
                            writable = household_size_writable,
                            comment = DIV(_class="tooltip",
                                          _title="%s|%s" % (T("Household Size"),
-                                                           T("Number of persons belonging to the same household."),
+                                                           T("Number of persons belonging to the same household"),
                                                            ),
                                          ),
                            ),
@@ -411,6 +412,7 @@ class DVRCaseModel(S3Model):
         self.add_components(tablename,
                             dvr_beneficiary_data = "case_id",
                             dvr_case_activity = "case_id",
+                            dvr_case_event = "case_id",
                             dvr_case_service_contact = "case_id",
                             dvr_economy = {"joinby": "case_id",
                                            "multiple": False,
@@ -447,7 +449,8 @@ class DVRCaseModel(S3Model):
         configure(tablename,
                   #report_options = report_options,
                   onvalidation = self.case_onvalidation,
-                  onaccept = self.case_onaccept,
+                  create_onaccept = self.case_create_onaccept,
+                  update_onaccept = self.case_onaccept,
                   )
 
         # Reusable field
@@ -624,13 +627,27 @@ class DVRCaseModel(S3Model):
                 form.errors["reference"] = msg
 
     # -------------------------------------------------------------------------
+    @classmethod
+    def case_create_onaccept(cls, form):
+        """
+            Wrapper for case_onaccept when called during create
+            rather than update
+
+            @param form: the FORM
+        """
+
+        cls.case_onaccept(form, create=True)
+
+    # -------------------------------------------------------------------------
     @staticmethod
-    def case_onaccept(form):
+    def case_onaccept(form, create=False):
         """
             Case onaccept routine:
             - auto-create active appointments
+            - count household size for new cases
 
             @param form: the FORM
+            @param create: perform additional actions for new cases
         """
 
         db = current.db
@@ -672,6 +689,20 @@ class DVRCaseModel(S3Model):
                           type_id = row.id,
                           )
 
+        if create and \
+           current.deployment_settings.get_dvr_household_size() == "auto":
+            # Count household size for newly created cases, in order
+            # to catch pre-existing case group memberships
+            gtable = s3db.pr_group
+            mtable = s3db.pr_group_membership
+            query = ((mtable.person_id == person_id) & \
+                     (mtable.deleted != True) & \
+                     (gtable.id == mtable.group_id) & \
+                     (gtable.group_type == 7))
+            rows = db(query).select(gtable.id)
+            for row in rows:
+                dvr_case_household_size(row.id)
+
 # =============================================================================
 class DVRCaseFlagModel(S3Model):
     """ Model for Case Flags """
@@ -685,9 +716,13 @@ class DVRCaseFlagModel(S3Model):
         T = current.T
         db = current.db
 
+        settings = current.deployment_settings
         crud_strings = current.response.s3.crud_strings
+
         define_table = self.define_table
         configure = self.configure
+
+        manage_transferability = settings.get_dvr_manage_transferability()
 
         # ---------------------------------------------------------------------
         # Case Flags
@@ -696,54 +731,77 @@ class DVRCaseFlagModel(S3Model):
         define_table(tablename,
                      Field("name",
                            label = T("Name"),
+                           requires = IS_NOT_EMPTY(),
                            ),
                      Field("advise_at_check_in", "boolean",
                            default = False,
                            label = T("Advice at Check-in"),
                            represent = s3_yes_no_represent,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Advice at Check-in"),
-                                                           T("Show handling instructions at check-in"),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Advice at Check-in"),
+                                                             T("Show handling instructions at check-in"),
+                                                             ),
                                          ),
                            ),
                      Field("advise_at_check_out", "boolean",
                            default = False,
                            label = T("Advice at Check-out"),
                            represent = s3_yes_no_represent,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Advice at Check-out"),
-                                                           T("Show handling instructions at check-out"),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Advice at Check-out"),
+                                                             T("Show handling instructions at check-out"),
+                                                             ),
                                          ),
                            ),
                      Field("instructions", "text",
                            label = T("Instructions"),
                            represent = s3_text_represent,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Instructions"),
-                                                           T("Instructions for handling of the case"),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Instructions"),
+                                                             T("Instructions for handling of the case"),
+                                                             ),
                                          ),
                            ),
                      Field("deny_check_in", "boolean",
                            default = False,
                            label = T("Deny Check-in"),
                            represent = s3_yes_no_represent,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Deny Check-in"),
-                                                           T("Deny the person to check-in when this flag is set"),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Deny Check-in"),
+                                                             T("Deny the person to check-in when this flag is set"),
+                                                             ),
                                          ),
                            ),
                      Field("deny_check_out", "boolean",
                            default = False,
                            label = T("Deny Check-out"),
                            represent = s3_yes_no_represent,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Deny Check-out"),
-                                                           T("Deny the person to check-out when this flag is set"),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Deny Check-out"),
+                                                             T("Deny the person to check-out when this flag is set"),
+                                                             ),
+                                         ),
+                           ),
+                     Field("is_not_transferable", "boolean",
+                           default = False,
+                           label = T("Not Transferable"),
+                           represent = s3_yes_no_represent,
+                           readable = manage_transferability,
+                           writable = manage_transferability,
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Not Transferable"),
+                                                             T("Cases with this flag are not transferable"),
+                                                             ),
+                                         ),
+                           ),
+                     Field("is_external", "boolean",
+                           default = False,
+                           label = T("External"),
+                           represent = s3_yes_no_represent,
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("External"),
+                                                             T("This flag indicates that the person is currently accommodated/being held externally (e.g. in Hospital or with Police)"),
+                                                             ),
                                          ),
                            ),
                      s3_comments(),
@@ -850,6 +908,7 @@ class DVRNeedsModel(S3Model):
         define_table(tablename,
                      Field("name",
                            label = T("Name"),
+                           requires = IS_NOT_EMPTY(),
                            ),
                      s3_comments(),
                      *s3_meta_fields())
@@ -945,9 +1004,13 @@ class DVRNotesModel(S3Model):
         #
         tablename = "dvr_note_type"
         define_table(tablename,
-                     Field("name", unique=True,
+                     Field("name", length=128, unique=True,
                            label = T("Name"),
-                           length = 128,
+                           requires = [IS_NOT_EMPTY(),
+                                       IS_NOT_ONE_OF(db,
+                                                     "dvr_note_type.name",
+                                                     ),
+                                       ],
                            ),
                      s3_comments(),
                      *s3_meta_fields())
@@ -1074,7 +1137,7 @@ class DVRCaseActivityModel(S3Model):
                            represent = s3_yes_no_represent,
                            ),
                      # Activate in template as needed:
-                     self.org_organisation_id(label=T("Referral Agency"),
+                     self.org_organisation_id(label = T("Referral Agency"),
                                               readable = False,
                                               writable = False,
                                               ),
@@ -1277,7 +1340,7 @@ class DVRCaseAppointmentModel(S3Model):
         #
         mandatory_comment = DIV(_class="tooltip",
                                 _title="%s|%s" % (T("Mandatory Appointment"),
-                                                  T("This appointment is mandatory before transfer."),
+                                                  T("This appointment is mandatory before transfer"),
                                                   ),
                                 ),
 
@@ -1294,10 +1357,10 @@ class DVRCaseAppointmentModel(S3Model):
                            default = True,
                            label = T("Active"),
                            represent = s3_yes_no_represent,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Active Appointment"),
-                                                           T("Automatically create this appointment for new cases."),
-                                                           ),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Active Appointment"),
+                                                             T("Automatically create this appointment for new cases"),
+                                                             ),
                                          ),
                            ),
                      Field("mandatory_children", "boolean",
@@ -1390,7 +1453,7 @@ class DVRCaseAppointmentModel(S3Model):
                            requires = IS_IN_SET(appointment_status_opts,
                                                 zero = None,
                                                 ),
-                           represent = S3Represent(options=appointment_status_opts,
+                           represent = S3Represent(options = appointment_status_opts,
                                                    ),
                            ),
                      s3_comments(),
@@ -1417,9 +1480,9 @@ class DVRCaseAppointmentModel(S3Model):
                         )
 
         configure(tablename,
-                  deduplicate = S3Duplicate(primary=("person_id",
-                                                     "type_id",
-                                                     ),
+                  deduplicate = S3Duplicate(primary = ("person_id",
+                                                       "type_id",
+                                                       ),
                                             ),
                   )
 
@@ -1890,6 +1953,217 @@ class DVRCaseAllowanceModel(S3Model):
                 }
 
 # =============================================================================
+class DVRCaseEventModel(S3Model):
+    """ Model representing monitoring events for cases """
+
+    names = ("dvr_case_event_type",
+             "dvr_case_event",
+             )
+
+    def model(self):
+
+        T = current.T
+
+        db = current.db
+        s3 = current.response.s3
+
+        define_table = self.define_table
+        crud_strings = s3.crud_strings
+
+        configure = self.configure
+
+        # ---------------------------------------------------------------------
+        # Case Event Types
+        #
+        role_table = str(current.auth.settings.table_group)
+        role_represent = S3Represent(lookup=role_table, fields=("role",))
+
+        tablename = "dvr_case_event_type"
+        define_table(tablename,
+                     Field("code", notnull=True, length=64, unique=True,
+                           label = T("Code"),
+                           requires = [IS_NOT_EMPTY(),
+                                       IS_NOT_ONE_OF(db,
+                                                     "dvr_case_event_type.code",
+                                                     ),
+                                       ],
+                           ),
+                     Field("name",
+                           label = T("Name"),
+                           requires = IS_NOT_EMPTY(),
+                           ),
+                     Field("is_default", "boolean",
+                           default = False,
+                           label = T("Default Event Type"),
+                           represent = s3_yes_no_represent,
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Default Event Type"),
+                                                             T("Assume this event type if no type was specified for an event"),
+                                                             ),
+                                         ),
+                           ),
+                     Field("role_required", "reference %s" % role_table,
+                           label = T("User Role Required"),
+                           ondelete = "SET NULL",
+                           represent = role_represent,
+                           requires = IS_EMPTY_OR(IS_ONE_OF(db,
+                                                            "%s.id" % role_table,
+                                                            role_represent,
+                                                            )),
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("User Role Required"),
+                                                             T("User role required to register events of this type"),
+                                                             ),
+                                         ),
+                           ),
+                     s3_comments(),
+                     *s3_meta_fields())
+
+        # CRUD Strings
+        crud_strings[tablename] = Storage(
+            label_create = T("Create Event Type"),
+            title_display = T("Event Type Details"),
+            title_list = T("Event Types"),
+            title_update = T("Edit Event Type"),
+            label_list_button = T("List Event Types"),
+            label_delete_button = T("Delete Event Type"),
+            msg_record_created = T("Event Type created"),
+            msg_record_modified = T("Event Type updated"),
+            msg_record_deleted = T("Event Type deleted"),
+            msg_list_empty = T("No Event Types currently defined"),
+        )
+
+        # Table Configuration
+        configure(tablename,
+                  onaccept = self.case_event_type_onaccept,
+                  )
+
+        # Reusable field
+        represent = S3Represent(lookup=tablename, translate=True)
+        event_type_id = S3ReusableField("type_id", "reference %s" % tablename,
+                                        label = T("Event Type"),
+                                        ondelete = "RESTRICT",
+                                        represent = represent,
+                                        requires = IS_ONE_OF(db, "%s.id" % tablename,
+                                                             represent,
+                                                             ),
+                                        sortby = "name",
+                                        comment = S3PopupLink(c = "dvr",
+                                                              f = "case_event_type",
+                                                              tooltip = T("Create a new event type"),
+                                                              ),
+                                        )
+
+        # ---------------------------------------------------------------------
+        # Case Events
+        #
+        tablename = "dvr_case_event"
+        define_table(tablename,
+                     self.dvr_case_id(comment = None,
+                                      empty = False,
+                                      label = T("Case Number"),
+                                      ondelete = "CASCADE",
+                                      writable = False,
+                                      ),
+                     # Beneficiary (component link):
+                     # @todo: populate from case and hide in case perspective
+                     self.pr_person_id(comment = None,
+                                       empty = False,
+                                       ondelete = "CASCADE",
+                                       writable = False,
+                                       ),
+                     event_type_id(comment = None,
+                                   ondelete = "CASCADE",
+                                   # Not user-writable as this is for automatic
+                                   # event registration, override in template if
+                                   # required:
+                                   writable = False,
+                                   ),
+                     s3_datetime(label = T("Date/Time"),
+                                 default = "now",
+                                 empty = False,
+                                 future = 0,
+                                 writable = False,
+                                 ),
+                     s3_comments(),
+                     *s3_meta_fields())
+
+        # CRUD Strings
+        crud_strings[tablename] = Storage(
+            label_create = T("Create Event"),
+            title_display = T("Event Details"),
+            title_list = T("Events"),
+            title_update = T("Edit Event"),
+            label_list_button = T("List Events"),
+            label_delete_button = T("Delete Event"),
+            msg_record_created = T("Event added"),
+            msg_record_modified = T("Event updated"),
+            msg_record_deleted = T("Event deleted"),
+            msg_list_empty = T("No Events currently registered"),
+            )
+
+        # Table Configuration
+        configure(tablename,
+                  deduplicate = S3Duplicate(primary = ("person_id",
+                                                       "type_id",
+                                                       ),
+                                            ),
+                  # Not user-insertable as this is for automatic
+                  # event registration, override in template if
+                  # required:
+                  insertable = False,
+                  list_fields = ["date",
+                                 "type_id",
+                                 (T("Registered by"), "created_by"),
+                                 "comments",
+                                 ],
+                  orderby = "%s.date desc" % tablename,
+                  )
+
+        # Custom method for event registration
+        self.set_method("dvr", "case_event",
+                        method = "register",
+                        action = DVRRegisterCaseEvent,
+                        )
+
+        # ---------------------------------------------------------------------
+        # Pass names back to global scope (s3.*)
+        #
+        return {}
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def defaults():
+        """ Safe defaults for names in case the module is disabled """
+
+        return {}
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def case_event_type_onaccept(form):
+        """
+            Onaccept routine for case event types:
+            - only one type can be the default
+
+            @param form: the FORM
+        """
+
+        form_vars = form.vars
+        try:
+            record_id = form_vars.id
+        except AttributeError:
+            record_id = None
+        if not record_id:
+            return
+
+        # If this type is the default, then set is_default-flag
+        # for all other types to False:
+        if "is_default" in form_vars and form_vars.is_default:
+            table = current.s3db.dvr_case_event_type
+            db = current.db
+            db(table.id != record_id).update(is_default = False)
+
+# =============================================================================
 def dvr_case_default_status():
     """
         Helper to get/set the default status for case records
@@ -2152,16 +2426,16 @@ class dvr_ManageAppointments(S3Method):
                 items = dt.html(totalrows,
                                 filteredrows,
                                 dt_id,
-                                dt_pageLength=display_length,
-                                dt_ajax_url=URL(c="dvr",
-                                                f="case_appointment",
-                                                args=["manage"],
-                                                vars={},
-                                                extension="aadata",
-                                                ),
-                                dt_searching="false",
-                                dt_pagination="true",
-                                dt_bulk_actions=dt_bulk_actions,
+                                dt_pageLength = display_length,
+                                dt_ajax_url = URL(c = "dvr",
+                                                  f = "case_appointment",
+                                                  args = ["manage"],
+                                                  vars = {},
+                                                  extension = "aadata",
+                                                  ),
+                                dt_searching = "false",
+                                dt_pagination = "true",
+                                dt_bulk_actions = dt_bulk_actions,
                                 )
 
                 # Filter form
@@ -2172,9 +2446,9 @@ class dvr_ManageAppointments(S3Method):
                     filter_submit_url = r.url(vars=_vars)
 
                     # Where to retrieve updated filter options from:
-                    filter_ajax_url = URL(f="case_appointment",
-                                          args=["filter.options"],
-                                          vars={},
+                    filter_ajax_url = URL(f = "case_appointment",
+                                          args = ["filter.options"],
+                                          vars = {},
                                           )
 
                     get_config = resource.get_config
@@ -2220,7 +2494,8 @@ class dvr_ManageAppointments(S3Method):
                                 filteredrows,
                                 dt_id,
                                 echo,
-                                dt_bulk_actions=dt_bulk_actions)
+                                dt_bulk_actions = dt_bulk_actions,
+                                )
                 response.headers["Content-Type"] = "application/json"
                 return items
 
@@ -2228,6 +2503,573 @@ class dvr_ManageAppointments(S3Method):
                 r.error(415, current.ERROR.BAD_FORMAT)
         else:
             r.error(405, current.ERROR.BAD_METHOD)
+
+# =============================================================================
+class DVRRegisterCaseEvent(S3Method):
+    """ Method handler to register case events """
+
+    # -------------------------------------------------------------------------
+    def apply_method(self, r, **attr):
+        """
+            Main entry point for REST interface.
+
+            @param r: the S3Request instance
+            @param attr: controller parameters
+        """
+
+        output = {}
+        response = current.response
+        s3 = response.s3
+
+        settings = current.deployment_settings
+
+        s3db = current.s3db
+
+        T = current.T
+
+        http = r.http
+        get_vars = r.get_vars
+        post_vars = r.post_vars
+
+        # User must be permitted to create case events
+        auth = current.auth
+        permitted = auth.s3_has_permission("create", "dvr_case_event")
+        if not permitted:
+            auth.permission.fail()
+
+        # Initialize form variables
+        label = None
+        scanner = None
+        event_code = None
+
+        check = False
+        error = None
+        person = None
+
+        if http == "GET":
+
+            # Coming from external scan app (e.g. Zxing), or from a link
+            label = get_vars.get("label")
+            event_code = get_vars.get("event")
+            scanner = get_vars.get("scanner")
+
+        elif http == "POST":
+
+            # @todo: add Ajax submission (full page reload rather slow)
+            if "check" in post_vars:
+                # Only check ID label, don't register an event
+                check = True
+                label = post_vars.get("label")
+
+            # Register an event (form.accepts)
+            event_code = post_vars.get("event")
+            scanner = post_vars.get("scanner")
+
+        pe_label = None
+        if label is not None:
+
+            # Identify the person
+            person = self.get_person(label)
+            if person is None:
+                if http == "GET":
+                    response.error = T("No person with this ID number")
+            else:
+                pe_label = person.pe_label
+                post_vars["label"] = pe_label
+
+        # Get the current event type
+        event_type = self.get_event_type(event_code)
+        if not event_type:
+            # Fall back to default event type
+            event_type = self.get_event_type()
+        event_code = event_type.code if event_type else None
+
+        formstyle = settings.get_ui_formstyle()
+        data = None
+
+        # Form always has an ID field (=pe_label)
+        formfields = [Field("label",
+                            label = T("ID"),
+                            requires = IS_NOT_EMPTY(error_message=T("Enter or scan an ID")),
+                            ),
+                      ]
+
+        # Add person data if identified
+        if person:
+            name = s3_fullname(person)
+            dob = person.date_of_birth
+            if dob:
+                dob = S3DateTime.date_represent(dob)
+                person_data = "%s (%s %s)" % (name, T("Date of Birth"), dob)
+            else:
+                person_data = name
+            data = {"id": "",
+                    "label": pe_label,
+                    "person": person_data,
+                    }
+            person_fields = [Field("person",
+                                   label = T("Name"),
+                                   writable = False,
+                                   ),
+                             ]
+            formfields.extend(person_fields)
+
+        # Form buttons
+        check_btn = INPUT(_class = "tiny secondary button check-btn",
+                          _name = "check",
+                          _type = "submit",
+                          _value = T("Check ID"),
+                          )
+        submit_btn = INPUT(_class = "tiny primary button submit-btn",
+                           _name = "submit",
+                           _type = "submit",
+                           _value = T("Register"),
+                           )
+        # Toggle buttons (active button first, otherwise pressing Enter
+        # hits the disabled button so requiring an extra tab step)
+        if person and event_code:
+            check_btn["_disabled"] = "disabled"
+            check_btn.add_class("hide")
+            buttons = [submit_btn, check_btn]
+        else:
+            submit_btn["_disabled"] = "disabled"
+            submit_btn.add_class("hide")
+            buttons = [check_btn, submit_btn]
+
+        # Add the cancel-action
+        buttons.append(A(T("Cancel"), _class = "cancel-action action-lnk"))
+
+        # Hidden fields to store event type and scanner
+        hidden = {"event": event_code,
+                  "scanner": scanner,
+                  }
+
+        # Generate the form
+        form = SQLFORM.factory(record = data,
+                               showid = False,
+                               formstyle = formstyle,
+                               table_name = "case_event",
+                               buttons = buttons,
+                               hidden = hidden,
+                               *formfields)
+        output["form"] = form
+
+        # Process the form
+        if form.accepts(r.post_vars,
+                        current.session,
+                        onvalidation = self.validate,
+                        formname = "dvr_register_event",
+                        keepvalues = False,
+                        hideerror = False,
+                        ):
+
+            formvars = form.vars
+            person_id = formvars.person_id
+
+            if not check:
+                if person_id:
+                    event_type_id = event_type.id if event_type else None
+                    success = self.register_event(person_id, event_type_id)
+                    if success:
+                        response.confirmation = T("Event registered")
+                    else:
+                        response.error = T("Could not register event")
+                else:
+                    response.error = T("Person not found")
+
+            # @todo: if form was scanned with ZXing and submitted with
+            #        "scan another" and not error: add hidden INPUT to
+            #        automatically start ZXing
+
+        # Event type header
+        if event_type:
+            event_type_name = T(event_type.name)
+        else:
+            event_type_name = current.messages["NONE"]
+        event_type_header = DIV(H4(SPAN(T(event_type_name),
+                                        _class = "event-type-name",
+                                        ),
+                                   SPAN(ICON("settings"),
+                                        _class = "event-type-setting",
+                                        ),
+                                   _class = "event-type-toggle",
+                                   ),
+                                _class = "event-type-header",
+                                )
+        output["event_type"] = event_type_header
+
+        # Event type selector
+        event_types = self.get_event_types()
+        buttons = []
+        for k, v in event_types.items():
+            if k != "_default":
+                button = LI(A(T(v.name),
+                              _class = "secondary button event-type-selector",
+                              data = {"code": s3_str(v.code),
+                                      "name": s3_str(T(v.name)),
+                                      },
+                              ),
+                            )
+                buttons.append(button)
+        output["event_type_selector"] = UL(buttons,
+                                           _class="button-group stack hide event-type-selector",
+                                           )
+
+        # ZXing Barcode Scanner Launch Button
+        output["zxing"] = self.get_zxing_launch_button(event_code)
+
+        # Custom view
+        response.view = self._view(r, "dvr/register_case_event.html")
+
+        # Static JS
+        scripts = s3.scripts
+        appname = r.application
+        if s3.debug:
+            script = "/%s/static/scripts/S3/s3.dvr.js" % appname
+        else:
+            script = "/%s/static/scripts/S3/s3.dvr.min.js" % appname
+        scripts.append(script)
+
+        return output
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def register_event(person_id, type_id):
+        """
+            Register a case event
+
+            @param person_id: the person record ID
+            @param type:id: the event type record ID
+        """
+
+        s3db = current.s3db
+
+        ctable = s3db.dvr_case
+        etable = s3db.dvr_case_event
+
+        # Get the case ID for the person_id
+        query = (ctable.person_id == person_id) & \
+                (ctable.deleted != True)
+        case = current.db(query).select(ctable.id,
+                                        limitby=(0, 1),
+                                        ).first()
+        if case:
+            case_id = case.id
+        else:
+            case_id = None
+
+        success = etable.insert(person_id = person_id,
+                                case_id = case_id,
+                                type_id = type_id,
+                                date = current.request.utcnow,
+                                )
+        return success
+
+    # -------------------------------------------------------------------------
+    def validate(self, form):
+        """
+            Validate the event registration form
+
+            @param form: the FORM
+        """
+
+        T = current.T
+
+        formvars = form.vars
+        pe_label = formvars.get("label").strip()
+
+        person = self.get_person(pe_label)
+        if person is None:
+            form.errors["label"] = T("No person with this ID number")
+        else:
+            formvars.person_id = person.id
+
+        # Validate the event type (if not default)
+        type_id = None
+        event_code = formvars.get("event_code")
+        if event_code:
+            event_type = self.get_event_type(event_code)
+            if not event_type:
+                form.errors["event_code"] = T("Invalid event code")
+            else:
+                type_id = event_type.id
+
+        formvars.type_id = type_id
+
+    # -------------------------------------------------------------------------
+    def get_event_types(self):
+        """
+            Lazy getter for case event types
+
+            @return: a dict {id: Row} for dvr_case_event_type, with an
+                     additional key "_default" for the default event type
+        """
+
+        if not hasattr(self, "event_types"):
+
+            event_types = {}
+            table = current.s3db.dvr_case_event_type
+
+            query = (table.deleted != True)
+
+            sr = current.auth.get_system_roles()
+            roles = current.session.s3.roles
+            if sr.ADMIN not in roles:
+                query &= (table.role_required == None) | \
+                         (table.role_required.belongs(roles))
+
+            rows = current.db(query).select(table.id,
+                                            table.code,
+                                            table.name,
+                                            table.is_default,
+                                            table.comments,
+                                            )
+            for row in rows:
+                event_types[row.id] = row
+                if row.is_default:
+                    event_types["_default"] = row
+            self.event_types = event_types
+
+        return self.event_types
+
+    # -------------------------------------------------------------------------
+    def get_event_type(self, code=None):
+        """
+            Get a case event type for an event code
+
+            @param code: the type code (using default event type if None)
+
+            @return: the dvr_case_event_type Row, or None if not found
+        """
+
+        event_types = self.get_event_types()
+
+        event_type = None
+        if code is None:
+            event_type = event_types.get("_default")
+        else:
+            for value in event_types.values():
+                if value.code == code:
+                    event_type = value
+                    break
+
+        return event_type
+
+    # -------------------------------------------------------------------------
+    @classmethod
+    def get_person(cls, pe_label):
+        """
+            Get the person record for a PE Label (or ID code), search only
+            for persons with an open DVR case.
+
+            @param pe_label: the PE label (or a scanned ID code as string)
+        """
+
+        s3db = current.s3db
+        person = None
+
+        # Fields to extract
+        fields = ["id",
+                  "pe_label",
+                  "first_name",
+                  "middle_name",
+                  "last_name",
+                  "date_of_birth",
+                  "gender",
+                  ]
+
+        data = cls.parse_code(pe_label)
+
+        def person_(label):
+            """ Helper function to find a person by pe_label """
+
+            query = (FS("pe_label") == pe_label) & \
+                    (FS("dvr_case.id") != None) & \
+                    (FS("dvr_case.archived") != True) & \
+                    (FS("dvr_case.status_id$is_closed") != True)
+            presource = s3db.resource("pr_person", filter=query)
+            rows = presource.select(fields,
+                                    start = 0,
+                                    limit = 1,
+                                    as_rows = True,
+                                    )
+            return rows[0] if rows else None
+
+        pe_label = data["label"]
+        if pe_label:
+            person = person_(pe_label)
+        if person:
+            data_match = True
+        else:
+            family = data.get("family")
+            if family:
+                # Get the head of family
+                person = person_(family)
+                data_match = False
+
+        if person:
+
+            first_name, last_name = None, None
+            if "first_name" in data:
+                first_name = s3_unicode(data["first_name"]).lower()
+                if s3_unicode(person.first_name).lower() != first_name:
+                    data_match = False
+            if "last_name" in data:
+                last_name = s3_unicode(data["last_name"]).lower()
+                if s3_unicode(person.last_name).lower() != last_name:
+                    data_match = False
+
+            if not data_match:
+                # Family member? => search by names/DoB
+                ptable = s3db.pr_person
+                query = current.auth.s3_accessible_query("read", ptable)
+
+                gtable = s3db.pr_group
+                mtable = s3db.pr_group_membership
+                otable = mtable.with_alias("family")
+                ctable = s3db.dvr_case
+                stable = s3db.dvr_case_status
+
+                left = [gtable.on((gtable.id == mtable.group_id) & \
+                                  (gtable.group_type == 7)),
+                        otable.on((otable.group_id == gtable.id) & \
+                                  (otable.person_id != mtable.person_id) & \
+                                  (otable.deleted != True)),
+                        ptable.on((ptable.id == otable.person_id) & \
+                                  (ptable.pe_label != None)),
+                        ctable.on((ctable.person_id == otable.person_id) & \
+                                  (ctable.archived != True)),
+                        stable.on((stable.id == ctable.status_id)),
+                        ]
+                query &= (mtable.person_id == person.id) & \
+                         (ctable.id != None) & \
+                         (stable.is_closed != True) & \
+                         (mtable.deleted != True) & \
+                         (ptable.deleted != True)
+                if first_name:
+                    query &= (ptable.first_name.lower() == first_name)
+                if last_name:
+                    query &= (ptable.last_name.lower() == last_name)
+
+                if "date_of_birth" in data:
+                    # Include date of birth
+                    dob, error = IS_UTC_DATE()(data["date_of_birth"])
+                    if not error and dob:
+                        query &= (ptable.date_of_birth == dob)
+
+                fields_ = [ptable[fn] for fn in fields]
+                rows = current.db(query).select(left=left,
+                                                limitby = (0, 2),
+                                                *fields_)
+                if len(rows) == 1:
+                    person = rows[0]
+
+        elif "first_name" in data and "last_name" in data:
+
+            first_name = s3_unicode(data["first_name"]).lower()
+            last_name = s3_unicode(data["last_name"]).lower()
+
+            # Search by names
+            query = (FS("pe_label") != None)
+            if first_name:
+                query &= (FS("first_name").lower() == first_name)
+            if last_name:
+                query &= (FS("last_name").lower() == last_name)
+
+            if "date_of_birth" in data:
+                # Include date of birth
+                dob, error = IS_UTC_DATE()(data["date_of_birth"])
+                if not error and dob:
+                    query &= (FS("date_of_birth") == dob)
+
+            # Find only open cases
+            query &= (FS("dvr_case.id") != None) & \
+                     (FS("dvr_case.archived") != True) & \
+                     (FS("dvr_case.status_id$is_closed") != True)
+
+            presource = s3db.resource("pr_person", filter=query)
+            rows = presource.select(fields,
+                                    start = 0,
+                                    limit = 2,
+                                    as_rows = True,
+                                    )
+            if len(rows) == 1:
+                person = rows[0]
+
+        return person
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def parse_code(code):
+        """
+            Parse a scanned ID code (QR Code)
+
+            @param code: the scanned ID code (string)
+
+            @return: a dict {"label": the PE label,
+                             "first_name": optional first name,
+                             "last_name": optional last name,
+                             "date_of_birth": optional date of birth,
+                             }
+        """
+
+        data = {"label": code}
+
+        pattern = current.deployment_settings.get_dvr_id_code_pattern()
+        if pattern and code:
+            import re
+            pattern = re.compile(pattern)
+            m = pattern.match(code)
+            if m:
+                data.update(m.groupdict())
+
+        return data
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def get_zxing_launch_button(event_code):
+        """
+            Renders the button to launch the Zxing barcode scanner app
+
+            @param event_code: the current event code
+            @return: the Zxing launch button
+        """
+
+        T = current.T
+
+        # URL template
+        template = "zxing://scan/?ret=%s&SCAN_FORMATS=Code 128,UPC_A,EAN_13"
+
+        # Query variables for return URL
+        scan_vars = {"label": "{CODE}",
+                     "scanner": "zxing",
+                     "event": "{EVENT}",
+                     }
+
+        # Return URL template
+        tmp = URL(args = ["register"],
+                  vars = scan_vars,
+                  host = True,
+                  )
+        tmp = str(tmp).replace("&", "%26")
+
+        # Current return URL
+        if event_code:
+            # must double-escape ampersands:
+            scan_vars["event"] = event_code.replace("&", "%2526")
+        ret = URL(args = ["register"],
+                  vars = scan_vars,
+                  host = True,
+                  )
+        ret = str(ret).replace("&", "%26")
+
+        # Construct button
+        return A(T("Scan with Zxing"),
+                 _href = template % ret,
+                 _class = "tiny primary button zxing-button",
+                 data = {"tmp": template % tmp,
+                         },
+                 )
 
 # =============================================================================
 def dvr_rheader(r, tabs=[]):
@@ -2263,7 +3105,7 @@ def dvr_rheader(r, tabs=[]):
             case = resource.select(["dvr_case.reference",
                                     "dvr_case.case_type_id",
                                     ],
-                                    represent=True,
+                                    represent = True,
                                     ).rows
             if case:
                 case = case[0]
@@ -2292,8 +3134,8 @@ def dvr_rheader(r, tabs=[]):
                               ]
 
         rheader = S3ResourceHeader(rheader_fields, tabs)(r,
-                                                         table=resource.table,
-                                                         record=record,
+                                                         table = resource.table,
+                                                         record = record,
                                                          )
 
     return rheader

@@ -74,6 +74,8 @@ class S3CAPModel(S3Model):
              "cap_area_location",
              "cap_area_tag",
              "cap_info_category_opts",
+             "cap_expiry_date",
+             "cap_sender_name",
              "cap_template_represent",
              )
 
@@ -284,6 +286,22 @@ class S3CAPModel(S3Model):
                            readable = False,
                            writable = True,
                            ),
+                     self.event_type_id(empty = False,
+                                        label = T("Event Type"),
+                                        comment = DIV(_class="tooltip",
+                                                      _title="%s|%s" % (T("Event Type of the alert message"),
+                                                                        T("Event Type is classification of event."))),
+                                        script = '''
+$.filterOptionsS3({
+    'trigger':'event_type_id',
+    'target':'template_id',
+    'lookupPrefix': 'cap',
+    'lookupResource':'template',
+    'fncRepresent': function(record,PrepResult){return record.template_title},
+    'optional': true,
+    'lookupURL': S3.Ap.concat('/cap/template.json?~.event_type_id=')
+})'''
+                     ),
                      Field("template_id", "reference cap_alert",
                            label = T("Template"),
                            ondelete = "RESTRICT",
@@ -785,6 +803,7 @@ class S3CAPModel(S3Model):
                                                            T("If not specified, will the same as the Event Type."))),
                            ),
                      self.event_type_id(empty = False,
+                                        readable = False,
                                         label = T("Event Type"),
                                         comment = DIV(_class="tooltip",
                                                       _title="%s|%s" % (T("Event Type of the alert message"),
@@ -901,13 +920,14 @@ class S3CAPModel(S3Model):
                      s3_datetime("expires",
                                  label = T("Expires at"),
                                  past = 0,
-                                 default = self.get_expirydate,
+                                 default = self.cap_expirydate,
                                  comment = DIV(_class="tooltip",
                                                _title="%s|%s" % (T("The expiry time of the information of the alert message"),
                                                                  T("If this item is not provided, each recipient is free to enforce its own policy as to when the message is no longer in effect."))),
                                  ),
                      Field("sender_name",
                            label = T("Sender's name"),
+                           default = self.cap_sendername,
                            comment = DIV(_class="tooltip",
                                          _title="%s|%s" % (T("The text naming the originator of the alert message"),
                                                            T("The human-readable name of the agency or authority issuing this alert."))),
@@ -1425,6 +1445,8 @@ T("Upload an image file(bmp, gif, jpeg or png), max. 800x800 pixels!"))),
                     cap_area_represent = area_represent,
                     cap_info_represent = info_represent,
                     cap_info_category_opts = cap_info_category_opts,
+                    cap_expiry_date = self.cap_expirydate,
+                    cap_sender_name = self.cap_sendername,
                     cap_template_represent = self.cap_template_represent,
                     )
 
@@ -1480,7 +1502,7 @@ T("Upload an image file(bmp, gif, jpeg or png), max. 800x800 pixels!"))),
 
     # -------------------------------------------------------------------------
     @staticmethod
-    def get_expirydate():
+    def cap_expirydate():
         """
             Default Expiry date based on the expire offset
         """
@@ -1488,6 +1510,27 @@ T("Upload an image file(bmp, gif, jpeg or png), max. 800x800 pixels!"))),
         return current.request.utcnow + \
                datetime.timedelta(days = current.deployment_settings.\
                                   get_cap_expire_offset())
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def cap_sendername():
+        """
+            Default Sender name for the alert
+            Sendername is the name of the organisation if user is associated
+            else None
+        """
+
+        db = current.db
+        utable = db.auth_user
+        otable = current.s3db.org_organisation
+        query = (utable.id == current.auth.user.id) & \
+                (utable.organisation_id == otable.id) & \
+                (otable.deleted != True)
+        row = db(query).select(otable.name,
+                               limitby=(0, 1)).first()
+        if row:
+            return row.name
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1670,6 +1713,8 @@ T("Upload an image file(bmp, gif, jpeg or png), max. 800x800 pixels!"))),
         alert_id = record["id"]
 
         # Update approved_on at the time the alert is approved
+        # @ToDo: update approved_on when approval is not required
+        # i.e. we allow editors to be self approver
         if alert_id:
             db = current.db
             approved_on = record["approved_on"]

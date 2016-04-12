@@ -19,6 +19,7 @@ from gluon import current
 from gluon.html import *
 from gluon.storage import Storage
 from s3 import s3_str
+from s3 import FS
 
 def config(settings):
     """
@@ -352,9 +353,21 @@ def config(settings):
     def customise_cap_alert_controller(**attr):
 
         s3 = current.response.s3
+        auth = current.auth
+        if not auth.user:
+            # For notifications for group
+            r = current.request
+            if not r.function == "public":
+                if r.get_vars.format == "msg":
+                    # This is called by notification
+                    # The request from web looks like r.extension
+                    s3.filter = (FS("scope") != "Private")
+                else:
+                    auth.permission.fail()
+
         # Custom prep
         standard_prep = s3.prep
-        def custom_prep(r):
+        def custom_prep(r):                    
             # Call standard prep
             if callable(standard_prep):
                 result = standard_prep(r)
@@ -536,85 +549,62 @@ def config(settings):
         """
 
         from s3 import s3_utc
-        created_on_selector = resource.prefix_selector("created_on")
-        created_on_colname = None
         notify_on = meta_data["notify_on"]
         last_check_time = meta_data["last_check_time"]
         rows = data["rows"]
         rfields = data["rfields"]
         output = {}
-        new, upd = [], []
+        new = [] # Alerts are updated by creating new alerts and setting status to update
+
+        db = current.db
+        atable = current.s3db.cap_alert
         if format == "text":
             # For SMS
             labels = []
             append = labels.append
 
+            append_record = new.append
             for rfield in rfields:
-                if rfield.selector == created_on_selector:
-                    created_on_colname = rfield.colname
-                elif rfield.ftype != "id":
+                if rfield.ftype != "id":
                     append((rfield.colname, rfield.label))
 
             for row in rows:
-                append_record = upd.append
-                if created_on_colname:
-                    try:
-                        created_on = row["_row"][created_on_colname]
-                    except KeyError, AttributeError:
-                        pass
-                    else:
-                        if s3_utc(created_on) >= last_check_time:
-                            append_record = new.append
-
-                record = []
-                append_column = record.append
-                for colname, label in labels:
-                    append_column((label, row[colname]))
-                append_record(record)
+                row_ = db(atable.id == row["cap_alert.id"]).select(atable.approved_on,
+                                                                   limitby=(0, 1)).first()
+                if row_ and row_.approved_on is not None:
+                    if s3_utc(row_.approved_on) >= last_check_time:
+                        record = []
+                        append_column = record.append
+                        for colname, label in labels:
+                            append_column((label, row[colname]))
+                        append_record(record)
 
             if "new" in notify_on and len(new):
                 output["new"] = len(new)
                 output["new_records"] = new
             else:
                 output["new"] = None
-            if "upd" in notify_on and len(upd):
-                output["upd"] = len(upd)
-                output["upd_records"] = upd
-            else:
-                output["upd"] = None
         else:
             # HTML emails
             elements = []
             append = elements.append
-            for rfield in rfields:
-                if rfield.selector == created_on_selector:
-                    created_on_colname = rfield.colname
+            append_record = new.append
 
             for row in rows:
-                append_record = upd.append
-                if created_on_colname:
-                    try:
-                        created_on = row["_row"][created_on_colname]
-                    except KeyError, AttributeError:
-                        pass
-                    else:
-                        if s3_utc(created_on) >= last_check_time:
-                            append_record = new.append
-                content = get_html_email_content(row)
-                container = DIV(DIV(content))
-                append(container)
-                append(BR())
-                append_record(container)
+                row_ = db(atable.id == row["cap_alert.id"]).select(atable.approved_on,
+                                                                   limitby=(0, 1)).first()
+                if row_ and row_.approved_on is not None:
+                    if s3_utc(row_.approved_on) >= last_check_time:
+                        content = get_html_email_content(row)
+                        container = DIV(DIV(content))
+                        append(container)
+                        append(BR())
+                        append_record(container)
             if "new" in notify_on and len(new):
                 output["new"] = len(new)
-                output["new_body"] = DIV(*elements)
+                output["new_records"] = DIV(*elements)
             else:
                 output["new"] = None
-            if "upd" in notify_on and len(upd):
-                output["upd"] = len(upd)
-                output["upd_body"] = DIV(*elements)
-            else:
-                output["upd"] = None
 
         output.update(meta_data)
         return output
@@ -817,10 +807,13 @@ def config(settings):
         event_type_id = row["cap_info.event_type_id"]
         priority_id = row["cap_info.priority"]
 
-        if not isinstance(event_type_id, lazyT):
-            event_type = itable.event_type_id.represent(event_type_id)
+        if event_type_id and event_type_id != "-":
+            if not isinstance(event_type_id, lazyT):
+                event_type = itable.event_type_id.represent(event_type_id)
+            else:
+                event_type = event_type_id
         else:
-            event_type = event_type_id
+            event_type = T("None")
 
         if priority_id and \
            priority_id != "-":

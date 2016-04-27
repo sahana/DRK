@@ -225,6 +225,28 @@ def person():
                 resource.configure(crud_form = crud_form,
                                    filter_widgets = filter_widgets,
                                    )
+            elif r.component_name == "allowance" and \
+                 r.method in (None, "update"):
+
+                records = r.component.select(["status"], as_rows=True)
+                if len(records) == 1:
+                    record = records[0]
+                    table = r.component.table
+                    readonly = []
+                    if record.status == 2:
+                        # Can't change payment details if already paid
+                        readonly = ["person_id",
+                                    "entitlement_period",
+                                    "date",
+                                    "paid_on",
+                                    "amount",
+                                    "currency",
+                                    ]
+                    for fn in readonly:
+                        if fn in table.fields:
+                            field = table[fn]
+                            field.writable = False
+                            field.comment = None
 
         # Module-specific list fields (must be outside of r.interactive)
         list_fields = ["dvr_case.reference",
@@ -427,7 +449,81 @@ def case_type():
 def allowance():
     """ Allowances: RESTful CRUD Controller """
 
-    return s3_rest_controller()
+    deduplicate = s3db.get_config("pr_person", "deduplicate")
+
+    def person_deduplicate(item):
+        """
+            Wrapper for person deduplicator to identify person
+            records, but preventing actual imports of persons
+        """
+
+        # Run standard person deduplication
+        if deduplicate:
+            deduplicate(item)
+
+        # Person not found?
+        if item.method != item.METHOD.UPDATE:
+
+            # Provide some meaningful details of the failing
+            # person record to facilitate correction of the source:
+            from s3 import s3_unicode
+            person_details = []
+            append = person_details.append
+            data = item.data
+            for f in ("pe_label", "last_name", "first_name", "date_of_birth"):
+                value = data.get(f)
+                if value:
+                    append(s3_unicode(value))
+            error = "Person not found: %s" % ", ".join(person_details)
+            item.error = error
+            item.element.set(current.xml.ATTRIBUTE["error"], error)
+
+            # Reject any new person records
+            item.accepted = False
+
+        # Skip - we don't want to update person records here
+        item.skip = True
+        item.method = None
+
+    s3db.configure("pr_person", deduplicate=person_deduplicate)
+
+    def prep(r):
+
+        if r.method == "import":
+            # Allow deduplication of persons by pe_label: existing
+            # pe_labels would be caught by IS_NOT_ONE_OF before
+            # reaching the deduplicator, so remove the validator here:
+            ptable = s3db.pr_person
+            ptable.pe_label.requires = None
+
+        record = r.record
+        if record:
+            table = r.table
+            readonly = []
+            if record.status == 2:
+                # Can't change payment details if already paid
+                readonly = ["person_id",
+                            "entitlement_period",
+                            "date",
+                            "paid_on",
+                            "amount",
+                            "currency",
+                            ]
+            for fn in readonly:
+                if fn in table.fields:
+                    field = table[fn]
+                    field.writable = False
+                    field.comment = None
+        return True
+    s3.prep = prep
+
+    table = s3db.dvr_allowance
+
+    return s3_rest_controller(csv_extra_fields=[{"label": "Date",
+                                                 "field": table.date,
+                                                 },
+                                                ],
+                              )
 
 # -----------------------------------------------------------------------------
 def case_appointment():
@@ -533,6 +629,20 @@ def case_event_type():
 # -----------------------------------------------------------------------------
 def case_event():
     """ Case Event Types: RESTful CRUD Controller """
+
+    def prep(r):
+        if not r.component:
+            list_fields = ["date",
+                           (T("ID"), "person_id$pe_label"),
+                           "person_id",
+                           "type_id",
+                           (T("Registered by"), "created_by"),
+                           "comments",
+                           ]
+            r.resource.configure(list_fields = list_fields,
+                                 )
+        return True
+    s3.prep = prep
 
     return s3_rest_controller()
 

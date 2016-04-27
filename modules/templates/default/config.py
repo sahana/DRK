@@ -487,6 +487,14 @@ def config(settings):
     #settings.dvr.household_size = True
     # Uncomment this to expose flags to mark appointment types as mandatory
     #settings.dvr.mandatory_appointments = True
+    # Uncomment this to have appointments with personal presence update last_seen_on
+    #settings.dvr.appointments_update_last_seen_on = True
+    # Uncomment this to automatically update the case status when appointments are completed
+    #settings.dvr.appointments_update_case_status = True
+    # Uncomment this to automatically close appointments when registering certain case events
+    #settings.dvr.case_events_close_appointments = True
+    # Uncomment this to have allowance payments update last_seen_on
+    #settings.dvr.payments_update_last_seen_on = True
     # Uncomment this to allow cases to belong to multiple case groups ("households")
     #settings.dvr.multiple_case_groups = True
     # Configure a regular expression pattern for ID Codes (QR Codes)
@@ -503,6 +511,8 @@ def config(settings):
 
     # -------------------------------------------------------------------------
     # Members
+    # Hide Membership Types
+    #settings.member.membership_types = False
     # Show a CV tab for Members
     #settings.member.cv_tab = True
 
@@ -557,6 +567,8 @@ def config(settings):
     #settings.org.regions = True
     # Make Organisation Regions Hierarchical
     #settings.org.regions_hierarchical = True
+    # Enable the use of Organisation Region Countries
+    #settings.org.region_countries = True
     # Uncomment to show a Tab for Organisation Resources
     #settings.org.resources_tab = True
     # Make Services Hierarchical

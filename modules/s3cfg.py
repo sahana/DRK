@@ -2661,6 +2661,34 @@ class S3Config(Storage):
         """
         return self.dvr.get("mandatory_appointments", False)
 
+    def get_dvr_appointments_update_last_seen_on(self):
+        """
+            Whether appointments which require presence shall
+            automatically update the "last seen on" date when
+            set to "completed"
+        """
+        return self.dvr.get("appointments_update_last_seen_on", False)
+
+    def get_dvr_appointments_update_case_status(self):
+        """
+            Whether appointments automatically update the case
+            status when set to "completed"
+        """
+        return self.dvr.get("appointments_update_case_status", False)
+
+    def get_dvr_case_events_close_appointments(self):
+        """
+            Whether case events automatically close appointments
+        """
+        return self.dvr.get("case_events_close_appointments", False)
+
+    def get_dvr_payments_update_last_seen_on(self):
+        """
+            Whether payments (e.g. allowance) shall automatically update
+            the "last seen on" date when set to "paid"
+        """
+        return self.dvr.get("payments_update_last_seen_on", False)
+
     def get_dvr_multiple_case_groups(self):
         """
             Whether a case can belong to multiple case groups at the same time
@@ -3306,6 +3334,13 @@ class S3Config(Storage):
         """
         return self.member.get("cv_tab", False)
 
+    def get_member_membership_types(self):
+        """
+            Whether to have Membership Types
+        """
+        return self.__lazy("member", "membership_types", default=True)
+
+
     # -------------------------------------------------------------------------
     # Organisations
     #
@@ -3454,6 +3489,12 @@ class S3Config(Storage):
             Whether to support Organisation Regions or not
         """
         return self.org.get("regions", False)
+
+    def get_org_region_countries(self):
+        """
+            Whether Organisation Regions maintain a list of countries
+        """
+        return self.org.get("region_countries", False)
 
     def get_org_regions_hierarchical(self):
         """
@@ -3672,6 +3713,10 @@ class S3Config(Storage):
     def get_pr_request_home_phone(self):
         """ Include Home Phone in the AddPersonWidget2 """
         return self.__lazy("pr", "request_home_phone", default=False)
+
+    def get_pr_request_mobile_phone(self):
+        """ Include Mobile Phone in the AddPersonWidget2 """
+        return self.__lazy("pr", "request_mobile_phone", default=True)
 
     def get_pr_request_year_of_birth(self):
         """ Include Year of Birth in the AddPersonWidget2 """

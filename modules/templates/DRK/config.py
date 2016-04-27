@@ -401,42 +401,26 @@ def config(settings):
             Show advise/instructions for checkpoint staff if
             such flags are set for this persons
 
-            @param site_id: the site ID (unused in this version)
+            @param site_id: the site ID (currently unused)
             @param person_id: the person record ID
         """
 
         s3db = current.s3db
 
-        ftable = s3db.dvr_case_flag
-        ltable = s3db.dvr_case_flag_case
-        query = (ltable.person_id == person_id) & \
-                (ltable.deleted != True) & \
-                (ftable.id == ltable.flag_id) & \
-                (ftable.deleted != True)
-
-        if action == "check-in":
-            query &= (ftable.advise_at_check_in == True)
-        elif action == "check-out":
-            query &= (ftable.advise_at_check_out == True)
-        else:
-            query &= ((ftable.advise_at_check_in == True) |
-                      (ftable.advise_at_check_out == True))
+        flag_info = current.s3db.dvr_get_flag_instructions(person_id,
+                                                           action = action,
+                                                           )
 
         from gluon import DIV, H4, P
 
         info = DIV(_class="checkpoint-advise")
         append = info.append
-        flags = current.db(query).select(ftable.name,
-                                         ftable.instructions,
-                                         )
 
-        for flag in flags:
-            instructions = flag.instructions
-            if instructions:
-                append(DIV(H4(T(flag.name)),
-                           P(instructions),
-                           _class="checkpoint-instructions",
-                           ))
+        for flagname, instructions in flag_info["info"]:
+            append(DIV(H4(T(flagname)),
+                       P(instructions),
+                       _class="checkpoint-instructions",
+                       ))
 
         from s3 import S3CustomController, s3_fullname
         S3CustomController._view("DRK", "advise.html")
@@ -492,7 +476,7 @@ def config(settings):
         for flag in flags:
             if flag.deny_check_in:
                 deny_check_in = True
-            if flag.advise_at_check_in and flag.instructions:
+            if flag.advise_at_check_in:
                 callback = show_flag_instructions
 
         if not deny_check_in:
@@ -520,14 +504,14 @@ def config(settings):
 
             # Update the Shelter Registration
             registration.update_record(check_in_date = current.request.utcnow,
-                                    registration_status = 2,
-                                    )
-
+                                       registration_status = 2,
+                                       )
             onaccept = s3db.get_config("cr_shelter_registration", "onaccept")
             if onaccept:
                 onaccept(registration)
 
         else:
+            # @todo: log as case event anyway?
             error = T("Check-in denied")
 
         return error, ", ".join(s3_str(w) for w in warnings), callback
@@ -557,7 +541,7 @@ def config(settings):
         for flag in flags:
             if flag.deny_check_out:
                 deny_check_out = True
-            if flag.advise_at_check_out and flag.instructions:
+            if flag.advise_at_check_out:
                 callback = show_flag_instructions
 
         warning = None
@@ -575,7 +559,6 @@ def config(settings):
                                             limitby=(0, 1),
                                             ).first()
             if not registration:
-                # @ToDo: Check to see if they DISAPPEARED, etc
                 error = T("Registration not found")
                 return error, warning
 
@@ -585,13 +568,14 @@ def config(settings):
 
             # Update the Shelter Registration
             registration.update_record(check_out_date = current.request.utcnow,
-                                    registration_status = 3)
-
+                                       registration_status = 3,
+                                       )
             onaccept = s3db.get_config("cr_shelter_registration", "onaccept")
             if onaccept:
                 onaccept(registration)
 
         else:
+            # @todo: log as case event anyway?
             error = T("Check-out denied")
 
         return error, warning, callback
@@ -793,6 +777,14 @@ def config(settings):
     settings.dvr.household_size = "auto"
     # Uncomment this to expose flags to mark appointment types as mandatory
     settings.dvr.mandatory_appointments = True
+    # Uncomment this to have appointments with personal presence update last_seen_on
+    settings.dvr.appointments_update_last_seen_on = True
+    # Uncomment this to have allowance payments update last_seen_on
+    settings.dvr.payments_update_last_seen_on = True
+    # Uncomment this to automatically update the case status when appointments are completed
+    settings.dvr.appointments_update_case_status = True
+    # Uncomment this to automatically close appointments when registering certain case events
+    settings.dvr.case_events_close_appointments = True
     # Uncomment this to allow cases to belong to multiple case groups ("households")
     #settings.dvr.multiple_case_groups = True
     # Configure a regular expression pattern for ID Codes (QR Codes)
@@ -1902,23 +1894,28 @@ def config(settings):
 
                 if r.interactive and not r.id:
                     # Custom filter widgets
-                    from s3 import S3TextFilter, S3OptionsFilter, S3DateFilter, s3_get_filter_opts
-                    date_filter = S3DateFilter("date")
-                    date_filter.operator = ["eq"]
+                    from s3 import S3TextFilter, \
+                                   S3OptionsFilter, \
+                                   S3DateFilter
 
                     filter_widgets = [
                         S3TextFilter(["person_id$pe_label",
                                       "person_id$first_name",
+                                      "person_id$middle_name",
                                       "person_id$last_name",
                                       ],
                                       label = T("Search"),
                                       ),
                         S3OptionsFilter("status",
-                                        default = 2,
-                                        cols = 3,
+                                        default = 1,
+                                        cols = 4,
                                         options = s3db.dvr_allowance_status_opts,
                                         ),
-                        date_filter,
+                        S3DateFilter("date"),
+                        S3DateFilter("paid_on"),
+                        S3DateFilter("entitlement_period",
+                                     hidden = True,
+                                     )
                         ]
                     resource.configure(filter_widgets = filter_widgets)
 
@@ -1929,14 +1926,17 @@ def config(settings):
 
                 # Custom list fields
                 list_fields = [(T("ID"), "person_id$pe_label"),
-                               "person_id$first_name",
-                               "person_id$last_name",
+                               "person_id",
+                               "entitlement_period",
                                "date",
-                               "amount",
                                "currency",
+                               "amount",
                                "status",
+                               "paid_on",
                                "comments",
                                ]
+                if r.representation == "xls":
+                    list_fields.append(("UUID", "person_id$uuid"))
 
                 resource.configure(list_fields = list_fields,
                                    insertable = False,
@@ -1946,6 +1946,19 @@ def config(settings):
 
             return result
         s3.prep = custom_prep
+
+        # Custom postp
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+            # Call standard postp
+            if callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if r.method == "register":
+                from s3 import S3CustomController
+                S3CustomController._view("DRK", "register_case_event.html")
+            return output
+        s3.postp = custom_postp
 
         return attr
 
@@ -2321,10 +2334,10 @@ def drk_dvr_rheader(r, tabs=[]):
                             ]
 
                 case = resource.select(["dvr_case.status_id",
-                                        #"dvr_case.status_id$code",
                                         "dvr_case.archived",
                                         "dvr_case.household_size",
                                         "dvr_case.transferable",
+                                        "dvr_case.last_seen_on",
                                         "first_name",
                                         "last_name",
                                         ],
@@ -2333,12 +2346,13 @@ def drk_dvr_rheader(r, tabs=[]):
                                         ).rows
 
                 if case:
+                    # Extract case data
                     case = case[0]
                     archived = case["_row"]["dvr_case.archived"]
                     case_status = lambda row: case["dvr_case.status_id"]
                     transferable = lambda row: case["dvr_case.transferable"]
                     household_size = lambda row: case["dvr_case.household_size"]
-                    #eligible = lambda row: ""
+                    last_seen_on = lambda row: case["dvr_case.last_seen_on"]
                     name = lambda row: s3_fullname(row)
                 else:
                     # Target record exists, but doesn't match filters
@@ -2346,27 +2360,19 @@ def drk_dvr_rheader(r, tabs=[]):
 
                 rheader_fields = [[(T("ID"), "pe_label"),
                                    (T("Case Status"), case_status),
-                                   (T("Transferable"), transferable),
+                                   (T("Last seen on"), last_seen_on),
                                    ],
                                   [(T("Name"), name),
-                                   (T("Size of Family"), household_size),
+                                   (T("Transferable"), transferable),
+                                   (T("Checked-out"), "absence"),
                                    ],
                                   ["date_of_birth",
-                                   (T("Checked-out"), "absence"),
+                                   (T("Size of Family"), household_size),
                                    ],
                                   ]
 
                 if archived:
                     rheader_fields.insert(0, [(None, hint)])
-
-                # @todo: No basis for this rule (statuses do no longer exist),
-                #        define new rule or remove this:
-                #if r.component_name == "allowance":
-                #    # Rule for eligibility:
-                #    allowance = case["dvr_case_status.code"] in ("STATUS5", "STATUS6")
-                #    eligible = lambda row, allowance = allowance: \
-                #                      s3_yes_no_represent(allowance)
-                #    rheader_fields[-1].append((T("Eligible for Allowance"), eligible))
 
         elif tablename == "dvr_case":
 

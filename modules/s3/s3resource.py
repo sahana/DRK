@@ -388,10 +388,8 @@ class S3Resource(object):
                     filterfor = v
                 if not is_list:
                     subquery = (table[k] == filterfor)
-                elif filterfor:
-                    subquery = (table[hook.filterby].belongs(filterfor))
                 else:
-                    subquery = None
+                    subquery = (table[k].belongs(set(filterfor)))
                 if subquery:
                     if query is None:
                         query = subquery

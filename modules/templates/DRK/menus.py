@@ -41,6 +41,7 @@ class S3MainMenu(default.S3MainMenu):
 
         has_role = current.auth.s3_has_role
         not_admin = not has_role("ADMIN")
+
         if not_admin and has_role("SECURITY"):
             return [
                 MM("Residents", c="security", f="person"),
@@ -50,13 +51,22 @@ class S3MainMenu(default.S3MainMenu):
                    check = shelter_id is not None,
                    ),
             ]
+
         elif not_admin and has_role("QUARTIER"):
             return [
                 MM("Residents", c=("dvr", "cr"), f=("person", "shelter_registration")),
             ]
+
         else:
             return [
                 MM("Residents", c=("dvr", "pr")),
+                MM("Event Registration", c="dvr", f="case_event",
+                   m = "register",
+                   p = "create",
+                   # Show only if not authorized to see "Residents"
+                   # (=the last preceding item)
+                   check = lambda this: not this.preceding()[-1].check_permission(),
+                   ),
                 MM("ToDo", c="project", f="task"),
                 #homepage("req"),
                 homepage("inv"),
@@ -189,10 +199,14 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         ),
                     M("Appointments", f="case_appointment")(
                         M("Overview"),
-                        M("Import Updates", m="import"),
-                        M("Bulk Status Update", m="manage"),
+                        M("Import Updates", m="import", p="create"),
+                        M("Bulk Status Update", m="manage", p="update"),
                         ),
                     M("Allowances", f="allowance")(
+                        M("Overview"),
+                        M("Payment Registration", m="register", p="update"),
+                        M("Status Update", m="manage", p="update"),
+                        M("Import", m="import", p="create"),
                         ),
                     M("Event Registration", c="dvr", f="case_event", m="register", p="create")(
                         ),

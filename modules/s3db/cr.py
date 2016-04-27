@@ -1312,12 +1312,14 @@ class S3ShelterRegistrationModel(S3Model):
                                        ).first()
 
                 if reg:
+                    person_id = reg.person_id
+
                     # Unit to check availability for
                     unit_id = reg.shelter_unit_id
 
                     # Get the previous status
                     htable = s3db.cr_shelter_registration_history
-                    query = (htable.person_id == reg.person_id) & \
+                    query = (htable.person_id == person_id) & \
                             (htable.shelter_id == reg.shelter_id) & \
                             (htable.deleted != True)
                     row = db(query).select(htable.status,
@@ -1370,9 +1372,13 @@ class S3ShelterRegistrationModel(S3Model):
                         htable.insert(previous_status = previous_status,
                                       status = current_status,
                                       date = effective_date,
-                                      person_id = reg.person_id,
+                                      person_id = person_id,
                                       shelter_id = reg.shelter_id,
                                       )
+
+                        # Update last_seen_on
+                        if current.deployment_settings.has_module("dvr"):
+                            s3db.dvr_update_last_seen(person_id)
 
         # Update population
         cls.shelter_population_onaccept(form,

@@ -280,6 +280,8 @@ class S3Msg(object):
                 type = "SMS",
                 recipient_type = None,
                 recipient = None,
+                #@ToDo:
+                #sender = None,
                 #hide = True,
                 subject = "",
                 message = "",
@@ -520,6 +522,7 @@ class S3Msg(object):
                               organisation_id = None,
                               contact_method = contact_method,
                               channel_id = channel_id,
+                              from_address = None,
                               outgoing_sms_handler = outgoing_sms_handler,
                               lookup_org = lookup_org,
                               channels = channels):
@@ -549,7 +552,9 @@ class S3Msg(object):
                 if contact_method == "EMAIL":
                     return self.send_email(address,
                                            subject,
-                                           message)
+                                           message,
+                                           sender = from_address,
+                                           )
                 elif contact_method == "SMS":
                     if lookup_org:
                         channel = channels.get(organisation_id)
@@ -611,7 +616,7 @@ class S3Msg(object):
 
         if contact_method == "EMAIL":
             mailbox = s3db.msg_email
-            fields.extend([mailbox.subject, mailbox.body])
+            fields.extend([mailbox.subject, mailbox.body, mailbox.from_address])
             left.append(mailbox.on(mailbox.message_id == outbox.message_id))
         elif contact_method == "SMS":
             mailbox = s3db.msg_sms
@@ -689,14 +694,17 @@ class S3Msg(object):
             if contact_method == "EMAIL":
                 subject = row["msg_email.subject"] or ""
                 message = row["msg_email.body"] or ""
+                from_address = row["msg_email.from_address"] or ""
             elif contact_method == "SMS":
                 subject = None
                 message = row["msg_sms.body"] or ""
+                from_address = None
                 if lookup_org:
                     organisation_id = row["msg_sms.organisation_id"]
             elif contact_method == "TWITTER":
                 subject = None
                 message = row["msg_twitter.body"] or ""
+                from_address = None
             else:
                 # @ToDo
                 continue
@@ -713,12 +721,15 @@ class S3Msg(object):
             if entity_type == "pr_person":
                 # Send the message to this person
                 try:
-                    status = dispatch_to_pe_id(pe_id,
-                                               subject,
-                                               message,
-                                               row.id,
-                                               message_id,
-                                               organisation_id)
+                    status = dispatch_to_pe_id(
+                                    pe_id,
+                                    subject,
+                                    message,
+                                    row.id,
+                                    message_id,
+                                    organisation_id = organisation_id,
+                                    from_address = from_address,
+                                    )
                 except:
                     status = False
 
@@ -800,8 +811,6 @@ class S3Msg(object):
 
         if chainrun:
             self.process_outbox(contact_method)
-
-        return
 
     # -------------------------------------------------------------------------
     # Send Email
@@ -1205,7 +1214,7 @@ class S3Msg(object):
             pass
 
         # Return False because the API needs to ask us for the messsage again.
-        return False 
+        return False
 
     # -------------------------------------------------------------------------
     def send_sms_by_pe_id(self,
@@ -2664,7 +2673,8 @@ class S3Compose(S3CRUD):
                                               # Breaks PG
                                               #orderby="instance_type",
                                               filterby="instance_type",
-                                              filter_opts=(recipient_type,))
+                                              filter_opts=(recipient_type,),
+                                              )
                 pe_field.widget = S3PentityAutocompleteWidget(types=(recipient_type,))
             else:
                 # @ToDo A new widget (tree?) required to handle multiple persons and groups
@@ -2676,20 +2686,23 @@ class S3Compose(S3CRUD):
                  T("Please enter the first few letters of the Person/Group for the autocomplete.")))
 
         sqlform = S3SQLDefaultForm()
-        logform = sqlform(request=request,
-                          resource=s3db.resource("msg_message"),
-                          onvalidation=self._compose_onvalidation,
-                          message="Message Sent",
-                          format="html")
-        outboxform = sqlform(request=request,
-                             resource=s3db.resource("msg_outbox"),
-                             message="Message Sent",
-                             format="html")
 
-        mailform = sqlform(request=request,
-                           resource=s3db.resource("msg_email"),
-                           message="Message Sent",
-                           format="html")
+        s3resource = s3db.resource
+        logform = sqlform(request = request,
+                          resource = s3resource("msg_message"),
+                          onvalidation = self._compose_onvalidation,
+                          message = "Message Sent",
+                          format = "html")
+
+        outboxform = sqlform(request = request,
+                             resource = s3resource("msg_outbox"),
+                             message = "Message Sent",
+                             format = "html")
+
+        mailform = sqlform(request = request,
+                           resource = s3resource("msg_email"),
+                           message = "Message Sent",
+                           format = "html")
 
         # Shortcuts
         lcustom = logform.custom
@@ -2706,7 +2719,7 @@ class S3Compose(S3CRUD):
             pe_row.append(TD(ocustom.widget.pe_id))
             pe_row.append(TD(ocustom.comment.pe_id))
 
-        # Build a custom form from the 2 source forms
+        # Build a custom form from the 3 source forms
         form = DIV(lcustom.begin,
                    TABLE(TBODY(TR(TD(LABEL(ocustom.label.contact_method)),
                                   TD(ocustom.widget.contact_method),
@@ -2732,12 +2745,14 @@ class S3Compose(S3CRUD):
                                TR(TD(),
                                   TD(INPUT(_type="submit",
                                            _value=T("Send message"),
-                                           _id="dummy_submit")),
+                                           _id="dummy_submit"),
+                                     ),
                                   _id="submit_record__row"
+                                  ),
                                ),
                          ),
-                   ),
-                   lcustom.end)
+                   lcustom.end,
+                   )
 
         s3 = current.response.s3
         if s3.debug:

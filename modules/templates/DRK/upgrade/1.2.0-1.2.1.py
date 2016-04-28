@@ -189,7 +189,7 @@ if not failed:
 
         max_check = row[last_check]
         if max_check and \
-           not (last_seen_on or max_check > last_seen_on):
+           (not last_seen_on or max_check > last_seen_on):
             last_seen_on = max_check
 
         if check_appointments:

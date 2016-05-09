@@ -81,6 +81,7 @@ class S3MainMenu(default.S3MainMenu):
                    ),
                 homepage("vol"),
                 homepage("hrm"),
+                MM("Facilities", c="org", f="facility"),
             ]
 
     # -------------------------------------------------------------------------
@@ -188,6 +189,8 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("Check-in overdue", c=("dvr", "pr"), f="person",
                           vars = {"closed": "0", "overdue": "1"},
                           ),
+                        M("Residents Reports", c="dvr", f="site_activity",
+                          ),
                         ),
                     M("Activities", f="case_activity")(
                         M("Emergencies",
@@ -228,6 +231,31 @@ class S3OptionsMenu(default.S3OptionsMenu):
                           ),
                         ),
                     )
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def org():
+        """ ORG / Organization Registry """
+
+        ADMIN = current.session.s3.system_roles.ADMIN
+
+        return M(c="org")(
+                    #M("Organizations", f="organisation")(
+                        #M("Create", m="create"),
+                        #M("Import", m="import")
+                    #),
+                    M("Facilities", f="facility")(
+                        M("Create", m="create"),
+                    ),
+                    #M("Organization Types", f="organisation_type",
+                      #restrict=[ADMIN])(
+                        #M("Create", m="create"),
+                    #),
+                    M("Facility Types", f="facility_type",
+                      restrict=[ADMIN])(
+                        M("Create", m="create"),
+                    ),
+                 )
 
     # -------------------------------------------------------------------------
     @staticmethod

@@ -111,8 +111,9 @@ class index(S3CustomController):
             current.response.s3.crud_strings["cap_alert"].msg_no_match = T("No Current Alerts match these filters.")
 
         ajax_url = URL(c="cap", f=fn, args="datalist.dl", vars={"list_id": list_id})
+        #@ToDo: Implement pagination properly
         output[list_id] = datalist.html(ajaxurl = ajax_url,
-                                        pagesize = None,
+                                        pagesize = 0,
                                         )
 
         # @ToDo: Options are currently built from the full-set rather than the filtered set
@@ -263,7 +264,7 @@ class subscriptions(S3CustomController):
             filters.append(language_filters)
 
         if current.request.get_vars["option"] == "manage_recipient" and \
-           (has_role("ALERT_EDITOR") or has_role("ALERT_APPROVER")):
+           has_role("ADMIN"):
             from s3 import S3Represent
             recipient_filters = [S3OptionsFilter("id",
                                        label = T("People"),
@@ -483,6 +484,10 @@ class subscriptions(S3CustomController):
                    ("FTP", T("FTP")),
                    ]
 
+        if not (request.get_vars["option"] == "manage_recipient" and \
+           has_role("ADMIN")):
+            methods.append(("GCM", T("GCM")))
+
         method_options = Storage(name = "method", requires = IS_IN_SET(methods))
 
         rows.append(("method_selector__row",
@@ -493,7 +498,7 @@ class subscriptions(S3CustomController):
                      ""))
 
         if not (request.get_vars["option"] == "manage_recipient" and \
-           (has_role("ALERT_EDITOR") or has_role("ALERT_APPROVER"))):
+           has_role("ADMIN")):
             # managing own subscriptions
             properties = subscription["comments"]
             if properties:
@@ -1004,7 +1009,7 @@ $('#method_selector').change(function(){
         ftable = s3db.pr_filter
         output = {}
         get_vars = {}
-        if pe_id is not None and subscription_id is not None:
+        if pe_id and subscription_id:
             query = (stable.id == subscription_id) & \
                     (stable.deleted != True) & \
                     (stable.pe_id == pe_id)
@@ -1023,6 +1028,10 @@ $('#method_selector').change(function(){
                     for k, v in filters:
                         if v is None:
                             continue
+                        if k == "info.language__belongs":
+                            k = "language__belongs"
+                        if k == "info.priority__belongs":
+                            k = "priority__belongs"
                         if k in get_vars:
                             if type(get_vars[k]) is list:
                                 get_vars[k].append(v)
@@ -1094,6 +1103,11 @@ $('#method_selector').change(function(){
         # Private alert are not sent through subscription
         filters = subscription.get("filters")
         filters = json.loads(filters)
+        for filter in filters:
+            if filter[0] == "language__belongs":
+                filter[0] = "info.language__belongs"
+            if filter[0] == "priority__belongs":
+                filter[0] = "info.priority__belongs"
         scope_filter = ["scope__belongs", "Public,Restricted"]
         filters.append(scope_filter)
         filters = json.dumps(filters)
@@ -1225,12 +1239,16 @@ $('#method_selector').change(function(){
 
         filters = subscription.get("filters")
         filters = json.loads(filters)
+        for filter in filters:
+            if filter[0] == "language__belongs":
+                filter[0] = "info.language__belongs"
+            if filter[0] == "priority__belongs":
+                filter[0] = "info.priority__belongs"
         scope_filter = ["scope__belongs", "Public,Restricted"]
         filters.append(scope_filter)
-        filters = json.dumps(filters)
-        filters_ = json.loads(filters)
-        filters_ = [filter_ for filter_ in filters_
-                    if filter_[0] != "id__belongs"]
+
+        filters_ = [filter for filter in filters
+                    if filter[0] != "id__belongs"]
         filters_ = json.dumps(filters_)
         if filter_id is None:
             success = ftable.insert(pe_id=pe_id, query=filters_)

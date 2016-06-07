@@ -1132,7 +1132,11 @@ class S3DeploymentAlertModel(S3Model):
             else:
                 channel = channels.first()
 
-            from_address = "%s@%s" % (channel.username, channel.server)
+            username = channel.username
+            if "@" in username:
+                from_address = username
+            else:
+                from_address = "%s@%s" % (username, channel.server)
 
             message_id = msg.send_by_pe_id(record.pe_id,
                                            subject=record.subject,
@@ -1901,7 +1905,7 @@ def deploy_alert_select_recipients(r, **attr):
     response = current.response
     s3 = response.s3
 
-    member_query = FS("application.active") != None
+    member_query = s3.member_query or (FS("application.active") != None)
 
     if r.http == "POST":
 

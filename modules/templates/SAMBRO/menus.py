@@ -86,13 +86,8 @@ class S3MainMenu(default.S3MainMenu):
                     menus_.extend([view_menu,
                                    mapping_menu,
                                   ])
-                elif has_role("ALERT_EDITOR"):
-                    menus_.extend([alerting_menu,
-                                   recipient_menu,
-                                   ])
                 elif has_role("ALERT_APPROVER"):
                     menus_.extend([alerting_menu,
-                                   recipient_menu,
                                    MM("Approve Alerts", c="cap", f="alert", m="review"),
                                    MM("View Approved Alerts", c="cap", f="alert",
                                       vars={"~.approved_by__ne": None}
@@ -101,6 +96,8 @@ class S3MainMenu(default.S3MainMenu):
                                       vars={"status": "incomplete"}
                                       )
                                    ])
+                elif has_role("ALERT_EDITOR"):
+                    menus_.append(alerting_menu)
                 else:
                     # Authenticated Users
                     menus_.append(view_menu)
@@ -152,7 +149,7 @@ class S3MainMenu(default.S3MainMenu):
                             MM("Manage Users", f="user"),
                             MM("Database", c="appadmin", f="index"),
                             MM("Error Tickets", f="errors"),
-                            MM("Synchronization", c="sync", f="index"),
+                            #MM("Synchronization", c="sync", f="index"),
                          )
         else:
             menu_admin = None
@@ -221,6 +218,18 @@ class S3OptionsMenu(default.S3OptionsMenu):
                     M("Event Types", c="event", f="event_type")(
                         M("Create", m="create"),
                         M("Import", m="import", p="create"),
+                    ),
+                )
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def org():
+        """ ORG / Organization Registry """
+
+        return M(c="org")(
+                    M("Organizations", f="organisation")(
+                        M("Create", m="create"),
+                        M("Import", m="import")
                     ),
                 )
 

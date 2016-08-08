@@ -91,7 +91,12 @@ def config(settings):
         PID = "person_id"
 
         # Owner Entity Foreign Key
-        realm_entity_fks = dict(pr_contact = [("org_organisation", EID),
+        realm_entity_fks = dict(hrm_competency = PID,
+                                hrm_credential = PID,
+                                hrm_experience = PID,
+                                hrm_human_resource = SID,
+                                hrm_training = PID,
+                                pr_contact = [("org_organisation", EID),
                                               ("po_household", EID),
                                               ("pr_person", EID),
                                               ],
@@ -105,16 +110,14 @@ def config(settings):
                                 pr_education = PID,
                                 pr_group = OID,
                                 pr_note = PID,
-                                hrm_human_resource = SID,
-                                hrm_training = PID,
                                 inv_recv = SID,
                                 inv_send = SID,
                                 inv_track_item = "track_org_id",
                                 inv_adj_item = "adj_id",
-                                req_req_item = "req_id",
                                 org_capacity_assessment_data = "assessment_id",
                                 po_household = "area_id",
                                 po_organisation_area = "area_id",
+                                req_req_item = "req_id",
                                 )
 
         # Default Foreign Keys (ordered by priority)
@@ -249,6 +252,8 @@ def config(settings):
     # Uncomment to disable responsive behavior of datatables
     settings.ui.datatables_responsive = False
 
+    # Icons
+    settings.ui.icons = "font-awesome3"
     settings.ui.custom_icons = {
         "male": "icon-male",
         "female": "icon-female",
@@ -309,7 +314,7 @@ def config(settings):
     BRCS = "Bangladesh Red Crescent Society"
     CRMADA = "Malagasy Red Cross Society"
     CVTL = "Timor-Leste Red Cross Society (Cruz Vermelha de Timor-Leste)"
-    IFRC = "International Federation of Red Cross and Red Crescent Societies"
+    #IFRC = "International Federation of Red Cross and Red Crescent Societies"
     IRCS = "Iraqi Red Crescent Society"
     NRCS = "Nepal Red Cross Society"
     NZRC = "New Zealand Red Cross"
@@ -1091,6 +1096,15 @@ def config(settings):
 
     settings.auth.realm_entity_types = auth_realm_entity_types
 
+    def deploy_cc_groups(default):
+        """ Which Groups to cc: on Deployment Alerts """
+
+        if _is_asia_pacific():
+            return ["RDRT Focal Points"]
+        return default
+
+    settings.deploy.cc_groups = deploy_cc_groups
+
     def hide_third_gender(default):
         """ Whether to hide the third person gender """
 
@@ -1651,14 +1665,10 @@ def config(settings):
                     from s3 import FS
                     s3.member_query = (FS("application.organisation_id") == organisation_id)
 
-            elif r.method == "send":
-                if _is_asia_pacific():
-                    settings.deploy.cc_groups = ["RDRT Focal Points"]
-
             return result
 
         s3.prep = custom_prep
-            
+
         return attr
 
     settings.customise_deploy_alert_controller = customise_deploy_alert_controller
@@ -1679,8 +1689,11 @@ def config(settings):
         created_on.label = T("Date")
         created_on.represent = lambda d: S3DateTime.date_represent(d, utc=True)
 
+        atable.cc.label = T("cc: Focal Points?")
+
         crud_form = S3SQLCustomForm("mission_id",
                                     "contact_method",
+                                    "cc",
                                     "subject",
                                     "body",
                                     "modified_on",
@@ -2026,17 +2039,17 @@ def config(settings):
                                crud_form = crud_form,
                                )
 
-            if not r.component and r.method == "create":
-                # Org is always IFRC
-                otable = s3db.org_organisation
-                query = (otable.name == IFRC)
-                organisation = db(query).select(otable.id,
-                                                limitby = (0, 1),
-                                                ).first()
-                try:
-                    r.table.organisation_id.default = organisation.id
-                except:
-                    current.log.error("Cannot find org %s - prepop not done?" % IFRC)
+            #if not r.component and r.method == "create":
+            #    # Org is always IFRC
+            #    otable = s3db.org_organisation
+            #    query = (otable.name == IFRC)
+            #    organisation = db(query).select(otable.id,
+            #                                    limitby = (0, 1),
+            #                                    ).first()
+            #    try:
+            #        r.table.organisation_id.default = organisation.id
+            #    except:
+            #        current.log.error("Cannot find org %s - prepop not done?" % IFRC)
 
             return result
         s3.prep = custom_prep
@@ -3102,13 +3115,14 @@ def config(settings):
                                                          },
                                               ))
 
-                # Representation of emergency contacts
-                from s3 import S3Represent
-                field = s3db.pr_contact_emergency.id
-                field.represent = S3Represent(lookup="pr_contact_emergency",
-                                              fields=("name", "relationship", "phone"),
-                                              labels=emergency_contact_represent,
-                                              )
+                if r.method != "profile":
+                    # Representation of emergency contacts (breaks the update_url construction in render_toolbox)
+                    from s3 import S3Represent
+                    field = s3db.pr_contact_emergency.id
+                    field.represent = S3Represent(lookup = "pr_contact_emergency",
+                                                  fields = ("name", "relationship", "phone"),
+                                                  labels = emergency_contact_represent,
+                                                  )
 
                 # Custom list fields for RDRT
                 phone_label = settings.get_ui_label_mobile_phone()
@@ -3340,7 +3354,11 @@ def config(settings):
                                            )
 
             # Grades 1-4
-            course_grade_opts = (1, 2, 3, 4)
+            course_grade_opts = {1: "1: %s" % T("Unsatisfactory"),
+                                 2: "2: %s" % T("Partially achieved expectations"),
+                                 3: "3: %s" % T("Fully achieved expectations"),
+                                 4: "4: %s" % T("Exceeded expectations"),
+                                 }
             field = ttable.grade
             field.readable = field.writable = True
             field.represent = None
@@ -3404,28 +3422,95 @@ def config(settings):
     settings.customise_hrm_training_controller = customise_hrm_training_controller
 
     # -------------------------------------------------------------------------
-    def deploy_status_update(person_id):
+    def deploy_status_update(organisation_id, person_id, membership):
         """
             Update the status of AP RDRT members based on their
             Trainings & Deployments
         """
-    
+
         db = current.db
         s3db = current.s3db
 
-        # Which courses has the person taken?
+        # Which RDRT courses has the person taken?
         ctable = s3db.hrm_course
         ttable = s3db.hrm_training
         query = (ttable.person_id == person_id) & \
                 (ttable.deleted == False) & \
-                (ttable.course_id == ctable.id)
+                (ttable.course_id == ctable.id) & \
+                (ctable.organisation_id == organisation_id)
         courses = db(query).select(ttable.grade,
                                    ttable.course_id,
                                    ctable.name,
-                                   ctable.organisation_id,
                                    )
 
-        # Which of these are RDRT courses?
+        new_status = 5 # Default Status
+        for course in courses:
+            grade = course["hrm_training.grade"]
+            if course["hrm_course.name"] == "RDRT Induction":
+                if grade == 1:
+                    # Fail
+                    if new_status == 5:
+                        new_status = 4
+                        # Continue to look for Specialist
+                    else:
+                        # Ignore
+                        pass
+                elif grade:
+                    # Pass
+                    new_status = 2
+                    break
+            elif grade > 1:
+                # Pass
+                new_status = 3
+                # Continue to look for a passed Induction
+
+        if new_status == 2:
+            # Has the person been deployed already?
+            astable = s3db.deploy_assignment
+            ltable = s3db.deploy_assignment_appraisal
+            aptable = s3db.hrm_appraisal
+            query = (astable.human_resource_id == membership.human_resource_id) & \
+                    (astable.id == ltable.assignment_id) & \
+                    (ltable.appraisal_id == aptable.id)
+            latest_appraisal = db(query).select(aptable.rating,
+                                                aptable.date,
+                                                orderby = aptable.date,
+                                                limitby = (0, 1)
+                                                ).first()
+
+            if latest_appraisal:
+                if latest_appraisal.rating > 1:
+                    # Pass
+                    new_status = 1
+                else:
+                    # Fail
+                    new_status = 4
+
+        if new_status != membership.status:
+            # Update the record
+            membership.update_record(status = new_status)
+
+    # -------------------------------------------------------------------------
+    def hrm_appraisal_onaccept(form):
+        """
+            If the person is a member of the AP RDRT then update their status
+        """
+
+        db = current.db
+        s3db = current.s3db
+        form_vars = form.vars
+
+        # Find the Person
+        person_id = form_vars.person_id
+        if not person_id:
+            # Load the record
+            table = s3db.hrm_appraisal
+            record = db(table.id == form_vars.id).select(table.person_id,
+                                                         limitby=(0, 1)
+                                                         ).first()
+            person_id = record.person_id
+
+        # Lookup the AP_ZONE ID
         otable = s3db.org_organisation
         org = db(otable.name == AP_ZONE).select(otable.id,
                                                 limitby=(0, 1),
@@ -3437,51 +3522,85 @@ def config(settings):
             current.log.error("Cannot find org %s - prepop not done?" % AP_ZONE)
             return
 
-        rdrt_courses = {}
-        for course in courses:
-            if course["hrm_course.organisation_id"] == organisation_id:
-                rdrt_courses[course["hrm_course.name"]] = course["hrm_training.grade"]
-        # @ToDo: Complete this when we know how to interpret the grades as Pass/Fail
-        
-        # Has the person been deployed already?
-        # @ToDo
-
-        # Read the current status of the member
-        dtable = s3db.deploy_application
+        # Are they a member of the AP RDRT?
         htable = s3db.hrm_human_resource
-        left = dtable.on(dtable.human_resource_id == htable.id)
-        app = db(htable.person_id == person_id).select(htable.id,
-                                                       dtable.status,
-                                                       left = left,
-                                                       limitby=(0, 1),
-                                                       ).first()
-        current_status = app["deploy_application.status"]
+        atable = s3db.deploy_application
+        query = (htable.person_id == person_id) & \
+                (atable.human_resource_id == htable.id) & \
+                (atable.organisation_id == organisation_id)
+        membership = db(query).select(atable.id,
+                                      atable.human_resource_id,
+                                      atable.status,
+                                      limitby = (0, 1)
+                                      ).first()
+        if membership:
+            deploy_status_update(organisation_id, person_id, membership)
 
-        if not current_status:
-            # Create the record
-            dtable.insert(human_resource_id = app["hrm_human_resource.id"],
-                          status = new_status,
-                          )
+    # -------------------------------------------------------------------------
+    def customise_hrm_appraisal_resource(r, tablename):
+
+        # Add custom onaccept
+        s3db = current.s3db
+        default = s3db.get_config(tablename, "onaccept")
+        if not default:
+            onaccept = hrm_appraisal_onaccept
+        elif not isinstance(default, list):
+            onaccept = [hrm_appraisal_onaccept, default]
+        else:
+            onaccept = default
+            if all(cb != hrm_appraisal_onaccept for cb in onaccept):
+                onaccept.append(hrm_appraisal_onaccept)
+        s3db.configure(tablename,
+                       onaccept = onaccept,
+                       )
+
+    settings.customise_hrm_appraisal_resource = customise_hrm_appraisal_resource
 
     # -------------------------------------------------------------------------
     def hrm_training_onaccept(form):
         """
-            If the Training is an AP RDRT-related one then adjust the status of the
-            Member accordingly
+            If the person is a member of the AP RDRT then update their status
         """
 
+        db = current.db
+        s3db = current.s3db
         form_vars = form.vars
-        person_id = form_vars.person_id
 
+        # Find the Person
+        person_id = form_vars.person_id
         if not person_id:
             # Load the record
-            ttable = current.s3db.hrm_training
-            record = current.db(ttable.id == form_vars.id).select(ttable.person_id,
-                                                                  limitby=(0, 1)
-                                                                  ).first()
+            table = s3db.hrm_training
+            record = db(table.id == form_vars.id).select(table.person_id,
+                                                         limitby=(0, 1)
+                                                         ).first()
             person_id = record.person_id
 
-        deploy_status_update(person_id)
+        # Lookup the AP_ZONE ID
+        otable = s3db.org_organisation
+        org = db(otable.name == AP_ZONE).select(otable.id,
+                                                limitby=(0, 1),
+                                                cache = s3db.cache,
+                                                ).first()
+        try:
+            organisation_id = org.id
+        except:
+            current.log.error("Cannot find org %s - prepop not done?" % AP_ZONE)
+            return
+
+        # Are they a member of the AP RDRT?
+        htable = s3db.hrm_human_resource
+        atable = s3db.deploy_application
+        query = (htable.person_id == person_id) & \
+                (atable.human_resource_id == htable.id) & \
+                (atable.organisation_id == organisation_id)
+        membership = db(query).select(atable.id,
+                                      atable.human_resource_id,
+                                      atable.status,
+                                      limitby = (0, 1)
+                                      ).first()
+        if membership:
+            deploy_status_update(organisation_id, person_id, membership)
 
     # -------------------------------------------------------------------------
     def customise_hrm_training_resource(r, tablename):
@@ -3501,8 +3620,7 @@ def config(settings):
                        onaccept = onaccept,
                        )
 
-    # @ToDo: Activate once requirements & implementation completed
-    #settings.customise_hrm_training_resource = customise_hrm_training_resource
+    settings.customise_hrm_training_resource = customise_hrm_training_resource
 
     # -------------------------------------------------------------------------
     def customise_hrm_training_event_controller(**attr):
@@ -5543,11 +5661,24 @@ def config(settings):
                                   ).first()
         if not budget:
             return
-        try:
-            budget.update_record(name = project.name)
-        except:
-            # unique=True violation
-            budget.update_record(name = "Budget for %s" % project.name)
+
+        # Build Budget Name from Project Name
+        project_name = project.name
+
+        # Check for duplicates
+        query = (btable.name == project_name) & \
+                (btable.id != budget.id)
+        duplicate = db(query).select(btable.id,
+                                     limitby=(0, 1)
+                                     ).first()
+
+        if not duplicate:
+            budget_name = project_name[:128]
+        else:
+            # Need another Unique name
+            import uuid
+            budget_name = "%s %s" % (project_name[:91], uuid.uuid4())
+        budget.update_record(name = budget_name)
 
         mtable = s3db.budget_monitoring
         exists = db(mtable.budget_entity_id == budget_entity_id).select(mtable.id,

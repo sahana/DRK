@@ -1427,17 +1427,25 @@ class S3OptionsFilter(S3FilterWidget):
         @keyword selectedList: number of selected items to show before
                                 collapsing into number of items
                                 (with "multiselect" widget)
-        @keyword no_opts: text to show if no options available
-        @keyword resource: alternative resource to look up options
-        @keyword lookup: field in the alternative resource to look up
-        @keyword options: fixed set of options (of {value: label} or
-                          a callable that returns one)
         @keyword size: maximum size of multi-letter options groups
                        (with "groupedopts" widget)
         @keyword help_field: field in the referenced table to display on
                              hovering over a foreign key option
                              (with "groupedopts" widget)
+
+        @keyword no_opts: text to show if no options available
         @keyword none: label for explicit None-option in many-to-many fields
+
+        @keyword resource: alternative resource to look up options
+        @keyword lookup: field in the alternative resource to look up
+        @keyword represent: custom represent for looked-up options
+                            (overrides field representation method)
+
+        @keyword options: fixed set of options (of {value: label} or
+                          a callable that returns one)
+        @keyword translate: translate the option labels in the fixed set
+                            (looked-up option sets will use the
+                            field representation method instead)
     """
 
     _class = "options-filter"
@@ -1770,7 +1778,15 @@ class S3OptionsFilter(S3FilterWidget):
 
         if options is not None:
             # Custom dict of {value:label} => use this label
-            opt_list = options.items()
+            if opts.get("translate"):
+                # Translate the labels
+                opt_list = [(opt, T(label))
+                            if isinstance(label, basestring) else (opt, label)
+                            for opt, label in options.items()
+                            ]
+            else:
+                opt_list = options.items()
+
 
         elif callable(represent):
             # Callable representation function:
@@ -1992,7 +2008,6 @@ class S3HierarchyFilter(S3FilterWidget):
             return variable
 
         # Detect and resolve __typeof queries
-        #BELONGS = current.db._adapter.BELONGS
         resolve = S3ResourceQuery._resolve_hierarchy
         selector = resource.prefix_selector(selector)
         for key, value in get_vars.items():
@@ -3172,6 +3187,7 @@ def s3_get_filter_opts(tablename,
                        fieldname = "name",
                        location_filter = False,
                        org_filter = False,
+                       key = "id",
                        none = False,
                        translate = False,
                        ):
@@ -3189,12 +3205,14 @@ def s3_get_filter_opts(tablename,
         @param fieldname: the name of the field to represent options with
         @param location_filter: whether to filter the values by location
         @param org_filter: whether to filter the values by root_org
+        @param key: the option key field (if not "id", e.g. a super key)
         @param none: whether to include an option for None
         @param translate: whether to translate the values
     """
 
     auth = current.auth
     table = current.s3db.table(tablename)
+
     if auth.s3_has_permission("read", table):
         query = auth.s3_accessible_query("read", table)
         if "deleted" in table.fields:
@@ -3210,16 +3228,16 @@ def s3_get_filter_opts(tablename,
                           (table.organisation_id == None))
             #else:
             #    query &= (table.organisation_id == None)
-        rows = current.db(query).select(table.id,
+        rows = current.db(query).select(table[key],
                                         table[fieldname],
                                         # Options are sorted later
                                         #orderby = table[fieldname]
                                         )
         if translate:
             T = current.T
-            opts = dict((row.id, T(row[fieldname])) for row in rows)
+            opts = dict((row[key], T(row[fieldname])) for row in rows)
         else:
-            opts = dict((row.id, row[fieldname]) for row in rows)
+            opts = dict((row[key], row[fieldname]) for row in rows)
         if none:
             opts[None] = current.messages["NONE"]
     else:

@@ -250,6 +250,12 @@ class S3DeploymentModel(S3Model):
                   create_next = profile,
                   delete_next = URL(c="deploy", f="mission", args="summary"),
                   create_onaccept = self.deploy_mission_create_onaccept,
+                  list_fields = ["name",
+                                 "date",
+                                 "location_id",
+                                 "event_type_id",
+                                 "status",
+                                 ],
                   orderby = "deploy_mission.date desc",
                   profile_cols = 1,
                   profile_header = lambda r: \
@@ -350,6 +356,7 @@ class S3DeploymentModel(S3Model):
         tablename = "deploy_application"
         define_table(tablename,
                      organisation_id(),
+                     # @ToDo: This makes a lot more sense as person_id not human_resource_id
                      human_resource_id(empty = False,
                                        label = T(hr_label),
                                        ),
@@ -455,7 +462,8 @@ class S3DeploymentModel(S3Model):
 
         assignment_id = S3ReusableField("assignment_id",
                                         "reference %s" % tablename,
-                                        ondelete = "CASCADE")
+                                        ondelete = "CASCADE",
+                                        )
 
         # ---------------------------------------------------------------------
         # Link Assignments to Appraisals
@@ -781,6 +789,8 @@ class S3DeploymentAlertModel(S3Model):
         # Alert
         # - also the PE representing its Recipients
         #
+        cc_groups = settings.get_deploy_cc_groups()
+
         tablename = "deploy_alert"
         define_table(tablename,
                      self.super_link("pe_id", "pr_pentity"),
@@ -798,15 +808,25 @@ class S3DeploymentAlertModel(S3Model):
                         ),
                      s3_date("date_requested",
                              default = "now",
-                             label = T("Date Requested")),
+                             label = T("Date Requested"),
+                             ),
                      s3_date("expected_start_date",
-                             label = T("Expected Start Date")),
+                             label = T("Expected Start Date"),
+                             ),
                      Field("contact_method", "integer",
                            default = 1,
                            label = T("Send By"),
                            represent = lambda opt: \
                             contact_method_opts.get(opt, NONE),
                            requires = IS_IN_SET(contact_method_opts),
+                           ),
+                     Field("cc", "boolean",
+                           default = True,
+                           # Define in template if-required
+                           #label = T("cc: Group?"),
+                           represent = s3_yes_no_represent,
+                           readable = cc_groups,
+                           writable = cc_groups,
                            ),
                      Field("subject", length=78,    # RFC 2822
                            label = T("Subject"),
@@ -914,7 +934,7 @@ class S3DeploymentAlertModel(S3Model):
             label_delete_button = T("Delete Recipient"),
             msg_record_created = T("Recipient added"),
             msg_record_modified = T("Recipient Details updated"),
-            msg_record_deleted = T("Recipient deleted"),
+            msg_record_deleted = T("Recipient removed"),
             msg_list_empty = T("No Recipients currently defined"))
 
         # ---------------------------------------------------------------------
@@ -1048,12 +1068,15 @@ class S3DeploymentAlertModel(S3Model):
         settings = current.deployment_settings
 
         # cc: list(s)
-        cc_groups = settings.get_deploy_cc_groups()
-        if cc_groups:
-            # Lookup pe_ids
-            gtable = s3db.pr_group
-            cc_groups = db(gtable.name.belongs(cc_groups)).select(gtable.pe_id)
-            cc_groups = [g.pe_id for g in cc_groups]
+        if record.cc:
+            cc_groups = settings.get_deploy_cc_groups()
+            if cc_groups:
+                # Lookup pe_ids
+                gtable = s3db.pr_group
+                cc_groups = db(gtable.name.belongs(cc_groups)).select(gtable.pe_id)
+                cc_groups = [g.pe_id for g in cc_groups]
+        else:
+            cc_groups = []
 
         # Send Message
         message = record.body
@@ -1278,6 +1301,13 @@ def deploy_rheader(r, tabs=[], profile=False):
         else:
             send_button = ""
 
+        if settings.get_deploy_cc_groups():
+            cc = TR(TH("%s: " % table.cc.label),
+                    s3_yes_no_represent(record.cc),
+                    )
+        else:
+            cc = ""
+
         # Tabs
         tabs = [(T("Message"), None),
                 (T("Recipients (%(number)s Total)") %
@@ -1297,6 +1327,7 @@ def deploy_rheader(r, tabs=[], profile=False):
                             TR(TH("%s: " % table.subject.label),
                                record.subject
                                ),
+                            cc,
                             ), rheader_tabs, _class="alert-rheader")
 
     elif resourcename == "mission":
@@ -1971,7 +2002,17 @@ def deploy_alert_select_recipients(r, **attr):
                        3: 3,
                        4: 4,
                        }
-        filter_widgets.extend((S3OptionsFilter("training.grade",
+        filter_widgets.extend((S3OptionsFilter("application.status",
+                                               label = T("Category"),
+                                               options = {1: "I",
+                                                          2: "II",
+                                                          3: "III",
+                                                          4: "IV",
+                                                          5: "V",
+                                                          },
+                                               cols = 5,
+                                               ),
+                               S3OptionsFilter("training.grade",
                                                label = T("Training Grade"),
                                                options = rating_opts,
                                                cols = 4,

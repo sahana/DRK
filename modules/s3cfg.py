@@ -1419,6 +1419,13 @@ class S3Config(Storage):
     def get_L10n_display_toolbar(self):
         return self.L10n.get("display_toolbar", True)
 
+    def get_L10n_extra_codes(self):
+        """
+            Extra codes for IS_ISO639_2_LANGUAGE_CODE
+            e.g. CAP needs to add "en-US"
+        """
+        return self.L10n.get("extra_codes", None)
+
     def get_L10n_languages(self):
         return self.L10n.get("languages")
 
@@ -1750,6 +1757,7 @@ class S3Config(Storage):
             Standard icon set, one of:
             - "font-awesome"
             - "foundation"
+            - "font-awesome3"
         """
         return self.ui.get("icons", "font-awesome")
 
@@ -2441,6 +2449,25 @@ class S3Config(Storage):
 
         return self.cap.get("same_code")
 
+    def get_cap_post_to_facebook(self):
+        """
+            Whether to post the alerts in facebook
+        """
+
+        return self.cap.get("post_to_facebook", False)
+
+    def get_cap_rss_use_links(self):
+        """
+            Whether to use links of entry element if link fail
+        """
+        return self.cap.get("rss_use_links", False)
+
+    def get_cap_use_ack(self):
+        """
+            Whether CAP Alerts have workflow for Acknowledgement
+        """
+        return self.cap.get("use_ack", False)
+
     # -------------------------------------------------------------------------
     # CMS: Content Management System
     #
@@ -2599,7 +2626,7 @@ class S3Config(Storage):
         """
             List of Group names that are cc'd on Alerts
         """
-        return self.deploy.get("cc_groups", [])
+        return self.__lazy("deploy", "cc_groups", default=[])
 
     def get_deploy_hr_label(self):
         """
@@ -4383,6 +4410,7 @@ class S3Config(Storage):
             resolved = set()
         seen = resolved.add
 
+        resolve = self.resolve_profile
         result = []
 
         def append(item):
@@ -4392,15 +4420,21 @@ class S3Config(Storage):
                     if options:
                         option = options.get(item[9:])
                         if option:
-                            result.extend(self.resolve_profile(options,
-                                                               option,
-                                                               resolved=resolved))
+                            result.extend(resolve(options,
+                                                  option,
+                                                  resolved=resolved,
+                                                  ))
                 else:
                     result.append(item)
             return
 
         if default:
-            append("template:mandatory")
+            if "default/base" in setting:
+                # Always first
+                append("default/base")
+            if options:
+                # Always second
+                append("template:mandatory")
         if setting is not None:
             if not isinstance(setting, (tuple, list)):
                 setting = (setting,)

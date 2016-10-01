@@ -32,6 +32,7 @@ from __future__ import division
 __all__ = ("S3ProjectModel",
            "S3ProjectActivityModel",
            "S3ProjectActivityTypeModel",
+           "S3ProjectActivityCaseModel",
            "S3ProjectActivityOrganisationModel",
            "S3ProjectActivitySectorModel",
            "S3ProjectAnnualBudgetModel",
@@ -319,6 +320,7 @@ class S3ProjectModel(S3Model):
         if use_codes:
             cappend("code")
         lappend("organisation_id")
+        default_row = "organisation_id"
         crud_fields += ["description",
                         "status_id",
                         "start_date",
@@ -335,9 +337,10 @@ class S3ProjectModel(S3Model):
                                     cols = 4,
                                     translate = True,
                                     ))
-            lappend((T("Sectors"), "sector.name"))
+            lappend((T("Sectors"), "sector_project.sector_id"))
+            default_row = "sector_project.sector_id"
         if mode_drr and settings.get_project_hazards():
-            lappend((T("Hazards"), "hazard.name"))
+            lappend((T("Hazards"), "hazard_project.hazard_id"))
             cappend(S3SQLInlineLink("hazard",
                                     label = T("Hazards"),
                                     field = "hazard_id",
@@ -346,6 +349,7 @@ class S3ProjectModel(S3Model):
                                     translate = True,
                                     ))
             #lappend("drr.hfa")
+            default_row = "hazard_project.hazard_id"
         if settings.get_project_themes():
             cappend(S3SQLInlineLink("theme",
                                     label = T("Themes"),
@@ -430,14 +434,14 @@ class S3ProjectModel(S3Model):
                                       "image",
                                       ),
                   report_options = Storage(
-                    rows=report_fields,
-                    cols=report_fields,
-                    fact=report_fact_fields,
-                    defaults=Storage(
-                        rows="hazard.name",
-                        cols=report_col_default,
-                        fact=report_fact_default,
-                        totals=True
+                    rows = report_fields,
+                    cols = report_fields,
+                    fact = report_fact_fields,
+                    defaults = Storage(
+                        rows = "hazard_id",
+                        cols = report_col_default,
+                        fact = report_fact_default,
+                        totals = True,
                     )
                   ),
                   super_entity = ("doc_entity", "budget_entity"),
@@ -758,10 +762,11 @@ class S3ProjectModel(S3Model):
                 count = current.db(query).update(organisation_id = organisation_id)
                 if not count:
                     # If there is no record to update, then create a new one
-                    otable.insert(project_id = id,
-                                  organisation_id = organisation_id,
-                                  role = lead_role,
-                                  )
+                    oid = otable.insert(project_id = id,
+                                        organisation_id = organisation_id,
+                                        role = lead_role,
+                                        )
+                    current.auth.s3_set_record_owner(otable, oid)
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1108,8 +1113,9 @@ class S3ProjectActivityModel(S3Model):
         use_projects = settings.get_project_projects()
         crud_fields = ["name",
                        "status_id",
+                       (T("Date"), "date"),
                        "location_id",
-                       "person_id",
+                       #"person_id",
                        "comments",
                        ]
 
@@ -1128,7 +1134,7 @@ class S3ProjectActivityModel(S3Model):
         fact_fields = [(T("Number of Activities"), "count(id)"),
                        ]
 
-        crud_index = 2
+        crud_index = 3
         list_index = 1
         if settings.get_project_sectors():
             crud_fields.insert(crud_index,
@@ -1185,6 +1191,23 @@ class S3ProjectActivityModel(S3Model):
                                 # Doesn't support translation
                                 #represent = "%(name)s",
                                 ))
+
+        # @ToDo: deployment_setting
+        if settings.has_module("supply"):
+            rappend("distribution.parameter_id")
+            fact_fields.insert(0,
+                               (T("Number of Items"), "sum(distribution.value)")
+                               )
+            default_fact = "sum(distribution.value)"
+            filter_widgets.append(
+                    S3OptionsFilter("distribution.parameter_id",
+                                    # Doesn't support translation
+                                    #represent = "%(name)s",
+                                    ))
+            list_fields.insert(list_index,
+                               (T("Items"), "distribution.parameter_id"))
+            list_index += 1
+
         # @ToDo: deployment_setting
         if settings.has_module("stats"):
             rappend("beneficiary.parameter_id")
@@ -1263,9 +1286,17 @@ class S3ProjectActivityModel(S3Model):
                   filter_widgets = filter_widgets,
                   list_fields = list_fields,
                   #onaccept = self.project_activity_onaccept,
+                  realm_entity = self.project_activity_realm_entity,
                   report_options = report_options,
                   super_entity = "doc_entity",
+                  update_realm = True,
                   )
+
+        if settings.has_module("dvr"):
+            # Custom Method to Assign HRs
+            self.set_method("project", "activity",
+                            method = "assign",
+                            action = self.dvr_AssignMethod(component="case_activity"))
 
         # Reusable Field
         represent = project_ActivityRepresent()
@@ -1310,6 +1341,14 @@ class S3ProjectActivityModel(S3Model):
                                               },
                        # Format for InlineComponent/filter_widget
                        project_beneficiary_activity = "activity_id",
+                       # Cases
+                       dvr_case = {"link": "project_case_activity",
+                                   "joinby": "activity_id",
+                                   "key": "case_id",
+                                   "actuate": "hide",
+                                   },
+                       # Format for InlineComponent/filter_widget
+                       project_case_activity = "activity_id",
                        # Distributions
                        supply_distribution = "activity_id",
                        # Events
@@ -1518,6 +1557,24 @@ class S3ProjectActivityModel(S3Model):
                            activity_type_id = activity_type_id,
                            )
 
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def project_activity_realm_entity(table, record):
+        """ Set the realm entity to the project's realm entity """
+
+        activity_id = record.id
+        db = current.db
+        table = db.project_activity
+        ptable = db.project_project
+        query = (table.id == activity_id) & \
+                (table.project_id == ptable.id)
+        project = db(query).select(ptable.realm_entity,
+                                   limitby=(0, 1)).first()
+        try:
+            return project.realm_entity
+        except:
+            return None
+
 # =============================================================================
 class S3ProjectActivityTypeModel(S3Model):
     """
@@ -1671,6 +1728,65 @@ class S3ProjectActivityTypeModel(S3Model):
         # Pass names back to global scope (s3.*)
         return dict(project_activity_type_id = activity_type_id,
                     )
+
+# =============================================================================
+class S3ProjectActivityCaseModel(S3Model):
+    """
+        Project Activity Case Model
+
+        An Activity can have multiple beneficiaries
+    """
+
+    names = ("project_case_activity",)
+
+    def model(self):
+
+        T = current.T
+
+        # ---------------------------------------------------------------------
+        # Project Activities <> Cases Link Table
+        #
+        # @ToDo" When Activity is linked to a Project, ensure these stay in sync
+        #
+        tablename = "project_case_activity"
+        self.define_table(tablename,
+                          self.project_activity_id(empty = False,
+                                                   ondelete = "CASCADE",
+                                                   ),
+                          self.dvr_case_id(empty = False,
+                                           ondelete = "CASCADE",
+                                           ),
+                          # @ToDo: Option to hide this in form & set automatically when scan uploaded
+                          Field("received", "boolean",
+                                default = False,
+                                label = T("Received?"),
+                                represent = s3_yes_no_represent,
+                                ),
+                          # @ToDo: Option to scan this in easily
+                          Field("signature", "upload",
+                                label = T("Signature"),
+                                length = current.MAX_FILENAME_LENGTH,
+                                represent = self.doc_image_represent,
+                                requires = [IS_EMPTY_OR(IS_IMAGE(maxsize=(400, 400),
+                                                                 error_message=T("Upload an image file (png or jpeg), max. 400x400 pixels!"))),
+                                            IS_EMPTY_OR(IS_UPLOAD_FILENAME())],
+                                uploadfolder = os.path.join(
+                                                current.request.folder, "uploads"),
+                                ),
+                          *s3_meta_fields())
+
+        self.configure(tablename,
+                       deduplicate = S3Duplicate(primary = ("activity_id",
+                                                            "case_id",
+                                                            ),
+                                                 ),
+                       list_fields = ["case_id$person_id",
+                                      "received",
+                                      ],
+                       )
+
+        # Pass names back to global scope (s3.*)
+        return {}
 
 # =============================================================================
 class S3ProjectActivityOrganisationModel(S3Model):
@@ -3652,6 +3768,7 @@ class S3ProjectOrganisationModel(S3Model):
                        onaccept = self.project_organisation_onaccept,
                        ondelete = self.project_organisation_ondelete,
                        onvalidation = self.project_organisation_onvalidation,
+                       realm_entity = self.project_organisation_realm_entity,
                        report_options = report_options,
                        )
 
@@ -3754,6 +3871,24 @@ class S3ProjectOrganisationModel(S3Model):
 
             # Set the project organisation_id to NULL (using None)
             db(ptable.id == project_id).update(organisation_id=None)
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def project_organisation_realm_entity(table, record):
+        """ Set the realm entity to the project's realm entity """
+
+        po_id = record.id
+        db = current.db
+        table = db.project_organisation
+        ptable = db.project_project
+        query = (table.id == po_id) & \
+                (table.project_id == ptable.id)
+        project = db(query).select(ptable.realm_entity,
+                                   limitby=(0, 1)).first()
+        try:
+            return project.realm_entity
+        except:
+            return None
 
 # =============================================================================
 class S3ProjectPlanningModel(S3Model):
@@ -9768,12 +9903,19 @@ def project_rheader(r):
 
     elif resourcename == "activity":
         tabs = [(T("Details"), None),
-                (T("Contact People"), "contact")]
+                (T("Contact People"), "contact"),
+                ]
+        if settings.has_module("supply"):
+            tabs.append((T("Distribution Items"), "distribution"))
+        if settings.has_module("dvr"):
+            tabs.append((T("Beneficiaries"), "case"))
+            tabs.append((T("Assign Beneficiaries"), "assign"))
         if settings.get_project_mode_task():
             tabs.append((T("Tasks"), "task"))
             tabs.append((attachments_label, "document"))
         else:
             tabs.append((T("Documents"), "document"))
+
         rheader_fields = []
         if record.project_id is not None:
             rheader_fields.append(["project_id"])

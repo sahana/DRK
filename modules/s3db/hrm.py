@@ -583,16 +583,13 @@ class S3HRModel(S3Model):
                     msg_record_deleted = T("Record deleted"),
                     msg_list_empty = T("No staff or volunteers currently registered"))
 
-        tooltip = DIV(_class="tooltip",
-                      _title="%s|%s" % (T("Human Resource"),
-                                        AUTOCOMPLETE_HELP))
         comment = S3PopupLink(c = "vol" if group == "volunteer" else "hrm",
                               f = group or "staff",
                               vars = {"child": "human_resource_id"},
                               label = crud_strings["hrm_%s" % group].label_create if group else \
                                       crud_strings[tablename].label_create,
                               title = label,
-                              tooltip = tooltip,
+                              tooltip = AUTOCOMPLETE_HELP,
                               )
 
         human_resource_id = S3ReusableField("human_resource_id", "reference %s" % tablename,
@@ -6528,6 +6525,12 @@ def hrm_human_resource_controller(extra_filter=None):
         deploy = c == "deploy"
         vol = c == "vol"
 
+        if s3.rtl:
+            # Ensure that + appears at the beginning of the number
+            f = s3db.pr_phone_contact.value
+            f.represent = s3_phone_represent
+            f.widget = S3PhoneWidget()
+
         method = r.method
         if method in ("form", "lookup"):
             return True
@@ -7136,6 +7139,12 @@ def hrm_person_controller(**attr):
         # Plug-in role matrix for Admins/OrgAdmins
         S3PersonRoleManager.set_method(r, entity="pr_person")
 
+        if s3.rtl:
+            # Ensure that + appears at the beginning of the number
+            f = s3db.pr_phone_contact.value
+            f.represent = s3_phone_represent
+            f.widget = S3PhoneWidget()
+
         method = r.method
         if r.representation == "s3json":
             current.xml.show_ids = True
@@ -7366,7 +7375,7 @@ def hrm_training_event_controller():
     """
 
     if current.session.s3.hrm.mode is not None:
-        current.session.error = T("Access denied")
+        current.session.error = current.T("Access denied")
         redirect(URL(f="index"))
 
     s3 = current.response.s3

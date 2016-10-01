@@ -374,8 +374,9 @@ class S3OrganisationModel(S3Model):
                      # @ToDo: Deprecate with Contact component
                      Field("phone",
                            label = T("Phone #"),
-                           represent = lambda v: v or NONE,
-                           requires = IS_EMPTY_OR(s3_phone_requires),
+                           represent = s3_phone_represent,
+                           requires = IS_EMPTY_OR(IS_PHONE_NUMBER_MULTI()),
+                           widget = S3PhoneWidget(),
                            #readable = False,
                            #writable = False,
                            ),
@@ -2455,6 +2456,7 @@ class S3OrganisationServiceModel(S3Model):
 
         T = current.T
         db = current.db
+        settings = current.deployment_settings
 
         configure = self.configure
         crud_strings = current.response.s3.crud_strings
@@ -2463,7 +2465,7 @@ class S3OrganisationServiceModel(S3Model):
 
         organisation_id = self.org_organisation_id
 
-        hierarchical_service_types = current.deployment_settings.get_org_services_hierarchical()
+        hierarchical_service_types = settings.get_org_services_hierarchical()
 
         # ---------------------------------------------------------------------
         # Service
@@ -2545,6 +2547,8 @@ class S3OrganisationServiceModel(S3Model):
 
         # ---------------------------------------------------------------------
         # Organizations <> Services Link Table
+        # - normally use org_service_location instead, but can use this simpler
+        #   variant if-required
         #
         tablename = "org_service_organisation"
         define_table(tablename,
@@ -2582,14 +2586,22 @@ class S3OrganisationServiceModel(S3Model):
                                )
 
         # ---------------------------------------------------------------------
-        # Organisation Service Locations
+        # Organizations <> Services <> Locations Link Table
         #
-        SITE = current.deployment_settings.get_org_site_label()
+        SITE = settings.get_org_site_label()
 
         tablename = "org_service_location"
         define_table(tablename,
                      super_link("doc_id", "doc_entity"),
-                     organisation_id(),
+                     organisation_id(
+                        default = current.auth.root_org(),
+                        requires = self.org_organisation_requires(
+                                    required = True,
+                                    # Only allowed to add Projects for Orgs
+                                    # that the user has write access to
+                                    updateable = True,
+                                    ),
+                        ),
                      # The site where the organisation provides services:
                      # (component not instance)
                      super_link("site_id", "org_site",
@@ -2638,17 +2650,17 @@ class S3OrganisationServiceModel(S3Model):
 
         # CRUD strings
         crud_strings[tablename] = Storage(
-            label_create = T("Create Service Location"),
-            title_display = T("Service Location Details"),
-            title_list = T("Service Locations"),
-            title_update = T("Edit Service Location"),
-            title_upload = T("Import Service Locations"),
-            label_list_button = T("List Service Locations"),
-            label_delete_button = T("Delete Service Location"),
-            msg_record_created = T("Service Location added"),
-            msg_record_modified = T("Service Location updated"),
-            msg_record_deleted = T("Service Location deleted"),
-            msg_list_empty = T("No Service Locations currently registered"))
+            label_create = T("Add Service"),
+            title_display = T("Service Details"),
+            title_list = T("Services"),
+            title_update = T("Edit Service"),
+            title_upload = T("Import Services"),
+            label_list_button = T("List Services"),
+            label_delete_button = T("Delete Service"),
+            msg_record_created = T("Service added"),
+            msg_record_modified = T("Service updated"),
+            msg_record_deleted = T("Service deleted"),
+            msg_list_empty = T("No Services currently registered"))
 
         # CRUD form
         service_widget = "hierarchy" if hierarchical_service_types else None
@@ -2677,11 +2689,46 @@ class S3OrganisationServiceModel(S3Model):
                        "comments",
                        ]
 
+        # Report axes
+        report_fields = ["organisation_id",
+                         "service_location_service.service_id",
+                         ]
+        add_report_field = report_fields.append
+
+        # Location levels (append to list fields and report axes)
+        # @ToDo: deployment_setting for Site vs Location
+        levels = current.gis.get_relevant_hierarchy_levels()
+        for level in levels:
+            lfield = "location_id$%s" % level
+            #list_fields.append(lfield)
+            add_report_field(lfield)
+
+        if "L0" in levels:
+            default_row = "location_id$L0"
+        elif "L1" in levels:
+            default_row = "location_id$L1"
+        elif "L2" in levels:
+            default_row = "location_id$L2"
+
         # Table configuration
         configure(tablename,
                   crud_form = crud_form,
                   deduplicate = self.org_service_location_deduplicate,
                   list_fields = list_fields,
+                  report_options = Storage(
+                    rows = report_fields,
+                    cols = report_fields,
+                    fact = [(T("Number of Organizations"),
+                             "count(organisation_id)",
+                             ),
+                            ],
+                    defaults = Storage(
+                        rows = default_row,
+                        cols = "service_location_service.service_id",
+                        fact = "count(organisation_id)",
+                        totals = True,
+                    )
+                  ),
                   super_entity = "doc_entity",
                   )
 
@@ -3753,13 +3800,15 @@ class S3FacilityModel(S3Model):
                            ),
                      Field("phone1",
                            label = T("Phone 1"),
-                           represent = lambda v: v or NONE,
-                           requires=IS_EMPTY_OR(s3_phone_requires),
+                           represent = s3_phone_represent,
+                           requires = IS_EMPTY_OR(IS_PHONE_NUMBER_MULTI()),
+                           widget = S3PhoneWidget(),
                            ),
                      Field("phone2",
                            label = T("Phone 2"),
-                           represent = lambda v: v or NONE,
-                           requires = IS_EMPTY_OR(s3_phone_requires),
+                           represent = s3_phone_represent,
+                           requires = IS_EMPTY_OR(IS_PHONE_NUMBER_MULTI()),
+                           widget = S3PhoneWidget(),
                            ),
                      Field("email",
                            label = T("Email"),
@@ -4463,13 +4512,15 @@ class S3OfficeModel(S3Model):
                      self.gis_location_id(),
                      Field("phone1",
                            label = T("Phone 1"),
-                           represent = lambda v: v or "",
-                           requires = IS_EMPTY_OR(s3_phone_requires),
+                           represent = s3_phone_represent,
+                           requires = IS_EMPTY_OR(IS_PHONE_NUMBER_MULTI()),
+                           widget = S3PhoneWidget(),
                            ),
                      Field("phone2",
                            label = T("Phone 2"),
-                           represent = lambda v: v or "",
-                           requires = IS_EMPTY_OR(s3_phone_requires),
+                           represent = s3_phone_represent,
+                           requires = IS_EMPTY_OR(IS_PHONE_NUMBER_MULTI()),
+                           widget = S3PhoneWidget(),
                            ),
                      Field("email",
                            label = T("Email"),
@@ -4478,8 +4529,9 @@ class S3OfficeModel(S3Model):
                            ),
                      Field("fax",
                            label = T("Fax"),
-                           represent = lambda v: v or "",
-                           requires = IS_EMPTY_OR(s3_phone_requires),
+                           represent = s3_phone_represent,
+                           requires = IS_EMPTY_OR(IS_PHONE_NUMBER_MULTI()),
+                           widget = S3PhoneWidget(),
                            ),
                      Field("obsolete", "boolean",
                            default = False,
@@ -7058,14 +7110,14 @@ class org_OrganisationDuplicate(object):
                      local name if enabled and no direct name match
         """
 
-        db = current.db
-        s3db = current.s3db
-
         matches = {}
 
         name = item.data.get("name")
         if not name:
             return matches
+
+        db = current.db
+        s3db = current.s3db
 
         table = item.table
 
@@ -7073,8 +7125,7 @@ class org_OrganisationDuplicate(object):
         query = (table.name.lower() == name.lower())
         rows = db(query).select(table.id, table.name)
 
-        settings = current.deployment_settings
-        if not rows and settings.get_L10n_translate_org_organisation():
+        if not rows and current.deployment_settings.get_L10n_translate_org_organisation():
             # Search by local name
             ltable = s3db.org_organisation_name
             query = (ltable.name_l10n.lower() == name.lower()) & \

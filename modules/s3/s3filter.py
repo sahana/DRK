@@ -54,7 +54,7 @@ from gluon.storage import Storage
 from gluon.tools import callback
 
 from s3datetime import s3_decode_iso_datetime, S3DateTime
-from s3query import S3ResourceField, S3ResourceQuery, S3URLQuery
+from s3query import FS, S3ResourceField, S3ResourceQuery, S3URLQuery
 from s3rest import S3Method
 from s3utils import s3_get_foreign_key, s3_unicode, S3TypeConverter
 from s3validators import *
@@ -654,6 +654,8 @@ class S3DateFilter(S3RangeFilter):
 
             # Do we want a timepicker?
             timepicker = False if ftype == "date" or hide_time else True
+            if timepicker:
+                input_class += " datetimepicker"
 
             # Make the two inputs constrain each other
             set_min = set_max = None
@@ -1184,7 +1186,7 @@ class S3LocationFilter(S3FilterWidget):
             joined = True
             # Filter out old Locations
             # @ToDo: Allow override
-            resource.add_filter(gtable.end_date == None)
+            resource.add_filter(FS("%s.end_date" % selector) == None)
 
         else:
             # Neither fixed options nor resource to look them up
@@ -1303,6 +1305,7 @@ class S3LocationFilter(S3FilterWidget):
                         path = path.split("/")
                 if path:
                     ids |= set(path)
+
             # Build lookup table for name_l10n
             ntable = s3db.gis_location_name
             query = (gtable.id.belongs(ids)) & \
@@ -2469,12 +2472,16 @@ class S3FilterForm(object):
 
             @param request: the request
             @param resource: the resource
+
+            @return: dict with default filters (URL vars)
         """
 
         s3 = current.response.s3
 
         get_vars = request.get_vars
         tablename = resource.tablename
+
+        default_filters = {}
 
         # Do we have filter defaults for this resource?
         filter_defaults = s3
@@ -2533,7 +2540,6 @@ class S3FilterForm(object):
             else:
                 widget_default = {}
 
-            default_filters = {}
             for variable in defaults:
                 if "__" in variable:
                     selector, operator = variable.split("__", 1)
@@ -2576,7 +2582,7 @@ class S3FilterForm(object):
                 for q in queries[alias]:
                     add_filter(q)
 
-        return
+        return default_filters
 
 # =============================================================================
 class S3Filter(S3Method):

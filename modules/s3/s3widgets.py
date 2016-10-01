@@ -57,6 +57,7 @@ __all__ = ("S3ACLWidget",
            "S3LocationDropdownWidget",
            "S3LocationLatLonWidget",
            "S3PasswordWidget",
+           "S3PhoneWidget",
            "S3Selector",
            "S3LocationSelector",
            "S3LocationSelectorWidget",
@@ -416,7 +417,7 @@ class S3AddPersonWidget(FormWidget):
         formstyle = s3.crud.formstyle
 
         default = dict(_type = "text",
-                       value = (value != None and str(value)) or "")
+                       value = (value is not None and str(value)) or "")
         attr = StringWidget._attributes(field, default, **attributes)
         attr["_class"] = "hide"
 
@@ -643,7 +644,7 @@ class S3AddPersonWidget2(FormWidget):
     def __call__(self, field, value, **attributes):
 
         default = dict(_type = "text",
-                       value = (value != None and str(value)) or "")
+                       value = (value is not None and str(value)) or "")
         attr = StringWidget._attributes(field, default, **attributes)
         attr["_class"] = "hide"
 
@@ -878,9 +879,9 @@ class S3AddPersonWidget2(FormWidget):
         fieldname = str(field).replace(".", "_")
 
         # Section Title
-        id = "%s_title" % fieldname
+        _id = "%s_title" % fieldname
         label = field.label
-        label = LABEL(label, _for=id)
+        label = LABEL(label, _for=_id)
         # @ToDo: Check Permissions for existing person records to know whether we can edit the person or simply select a different one
         widget = DIV(A(ICON("edit"),
                        _title=T("Edit Entry"), # "Edit Selection"
@@ -899,7 +900,7 @@ class S3AddPersonWidget2(FormWidget):
         #    _controls = DIV(widget, _class="controls")
         #    row = DIV(label, _controls,
         #              _class="control-group hide box_top",
-        #              _id="%s__row" % id,
+        #              _id="%s__row" % _id,
         #              )
         #    rows.append(row)
         #else:
@@ -913,11 +914,11 @@ class S3AddPersonWidget2(FormWidget):
                         _class="box_top_td",
                         _colspan=2,
                         ),
-                     _id="%s__row" % id,
+                     _id="%s__row" % _id,
                      )
             rows.append(row)
         else:
-            row = formstyle("%s__row" % id, label, widget, comment)
+            row = formstyle("%s__row" % _id, label, widget, comment)
             row.add_class("box_top hide")
             rows.append(row)
 
@@ -998,7 +999,7 @@ class S3AddPersonWidget2(FormWidget):
 
         for f in fields:
             fname = f[0]
-            id = "%s_%s" % (fieldname, fname)
+            _id = "%s_%s" % (fieldname, fname)
             label = f[1]
             if f[3]:
                 # Mark Required
@@ -1006,10 +1007,10 @@ class S3AddPersonWidget2(FormWidget):
                             SPAN(" *", _class="req"))
             else:
                 label = "%s:" % label
-            label = LABEL(label, _for=id)
+            label = LABEL(label, _for=_id)
             widget = f[2]
             if fname not in ("date_of_birth", "gender"):
-                widget["_id"] = id
+                widget["_id"] = _id
                 widget["_name"] = fname
                 widget["_value"] = s3_unicode(values.get(fname, "")).encode("utf-8")
             #if bootstrap:
@@ -1023,11 +1024,11 @@ class S3AddPersonWidget2(FormWidget):
             #    _controls = DIV(widget, _class="controls")
             #    row = DIV(label, _controls,
             #              _class="control-group hide box_middle",
-            #              _id="%s__row" % id,
+            #              _id="%s__row" % _id,
             #              )
             #    rows.append(row)
             #else:
-            row = formstyle("%s__row" % id, label, widget, comment)
+            row = formstyle("%s__row" % _id, label, widget, comment)
             if tuple_rows:
                 row[0].add_class("box_middle")
                 row[1].add_class("box_middle")
@@ -1130,7 +1131,7 @@ class S3AutocompleteWidget(FormWidget):
 
         default = dict(
             _type = "text",
-            value = (value != None and str(value)) or "",
+            value = (value is not None and str(value)) or "",
             )
         attr = StringWidget._attributes(field, default, **attributes)
 
@@ -1291,7 +1292,7 @@ class S3ColorPickerWidget(FormWidget):
 
         default = dict(#_type = "color", # We don't want to use native HTML5 widget as it doesn't support our options & is worse for documentation
                        _type = "text",
-                       value = (value != None and str(value)) or "",
+                       value = (value is not None and str(value)) or "",
                        )
 
         attr = StringWidget._attributes(field, default, **attributes)
@@ -1844,7 +1845,7 @@ class S3DateWidget(FormWidget):
                           .replace("%b", "M")
 
         default = dict(_type = "text",
-                       value = (value != None and str(value)) or "",
+                       value = (value is not None and str(value)) or "",
                        )
 
         attr = StringWidget._attributes(field, default, **attributes)
@@ -2497,7 +2498,7 @@ def S3GenericAutocompleteTemplate(post_process,
 
     default = dict(
         _type = "text",
-        value = (value != None and s3_unicode(value)) or "",
+        value = (value is not None and s3_unicode(value)) or "",
         )
     attr = StringWidget._attributes(field, default, **attributes)
 
@@ -3041,7 +3042,7 @@ class S3HiddenWidget(StringWidget):
 
         default = dict(
             _type = "text",
-            value = (value != None and str(value)) or "",
+            value = (value is not None and str(value)) or "",
             )
         attr = StringWidget._attributes(field, default, **attributes)
         attr["_class"] = "hide %s" % attr["_class"]
@@ -3080,7 +3081,7 @@ class S3HumanResourceAutocompleteWidget(FormWidget):
 
         default = dict(
             _type = "text",
-            value = (value != None and str(value)) or "",
+            value = (value is not None and str(value)) or "",
             )
         attr = StringWidget._attributes(field, default, **attributes)
 
@@ -3542,7 +3543,7 @@ class S3LocationAutocompleteWidget(FormWidget):
 
         default = dict(
             _type = "text",
-            value = (value != None and s3_unicode(value)) or "",
+            value = (value is not None and s3_unicode(value)) or "",
             )
         attr = StringWidget._attributes(field, default, **attributes)
 
@@ -3667,7 +3668,7 @@ class S3LocationLatLonWidget(FormWidget):
             requires = IS_EMPTY_OR(requires)
 
         defaults = dict(_type = "text",
-                        value = (value != None and str(value)) or "")
+                        value = (value is not None and str(value)) or "")
         attr = StringWidget._attributes(field, defaults, **attributes)
         # Hide the real field
         attr["_class"] = "hide"
@@ -3822,7 +3823,7 @@ class S3LocationSelectorWidget(FormWidget):
             # "dummy" left in the value.
             value = None
         defaults = dict(_type = "text",
-                        value = (value != None and str(value)) or "")
+                        value = (value is not None and str(value)) or "")
         attr = StringWidget._attributes(field, defaults, **attributes)
         if request.controller == "appadmin":
             # Don't use this widget in appadmin
@@ -4844,7 +4845,8 @@ class S3LocationSelector(S3Selector):
             @param reverse_lx: render Lx selectors in the order usually used by
                                street Addresses (lowest level first), and below the
                                address line
-            @param show_address: show a field for street address
+            @param show_address: show a field for street address.
+                                 If the parameter is set to a string then this is used as the label.
             @param show_postcode: show a field for postcode
             @param show_latlon: show fields for manual Lat/Lon input
             @param latlon_mode: (initial) lat/lon input mode ("decimal" or "dms")
@@ -5109,10 +5111,14 @@ class S3LocationSelector(S3Selector):
         show_address = self.show_address
         if show_address:
             address = values.get("address")
+            if show_address is True:
+                label = T("Street Address")
+            else:
+                label = show_address
             components["address"] = manual_input(fieldname,
                                                  "address",
                                                  address,
-                                                 T("Street Address"),
+                                                 label,
                                                  hidden = not address,
                                                  )
 
@@ -7385,7 +7391,7 @@ class S3PersonAutocompleteWidget(FormWidget):
 
         default = dict(
             _type = "text",
-            value = (value != None and str(value)) or "",
+            value = (value is not None and str(value)) or "",
             )
         attr = StringWidget._attributes(field, default, **attributes)
 
@@ -7479,7 +7485,7 @@ class S3PentityAutocompleteWidget(FormWidget):
 
         default = dict(
             _type = "text",
-            value = (value != None and str(value)) or "",
+            value = (value is not None and str(value)) or "",
             )
         attr = StringWidget._attributes(field, default, **attributes)
 
@@ -7573,7 +7579,7 @@ class S3PriorityListWidget(StringWidget):
 
         default = dict(
             _type = "text",
-            value = (value != None and str(value)) or "",
+            value = (value is not None and str(value)) or "",
             )
         attr = StringWidget._attributes(field, default, **attributes)
 
@@ -7612,7 +7618,7 @@ class S3SiteAutocompleteWidget(FormWidget):
 
         default = dict(
             _type = "text",
-            value = (value != None and str(value)) or "",
+            value = (value is not None and str(value)) or "",
             )
         attr = StringWidget._attributes(field, default, **attributes)
 
@@ -7775,7 +7781,7 @@ class S3StringWidget(StringWidget):
     def __call__(self, field, value, **attributes):
 
         default = dict(
-            value = (value != None and str(value)) or "",
+            value = (value is not None and str(value)) or "",
             )
 
         if self.textarea:
@@ -8091,15 +8097,16 @@ class S3PasswordWidget(FormWidget):
     """
         Widget for password fields, allows unmasking of passwords
     """
+
     def __call__(self, field, value, **attributes):
 
-        s3 = current.response.s3
         T = current.T
 
         tablename = field._tablename
         fieldname = field.name
-        s3.js_global.append('''i18n.password_view="%s"''' % T("View"))
-        s3.js_global.append('''i18n.password_mask="%s"''' % T("Mask"))
+        js_append = current.response.s3.js_global.append
+        js_append('''i18n.password_view="%s"''' % T("View"))
+        js_append('''i18n.password_mask="%s"''' % T("Mask"))
 
         password_input = INPUT(_name = fieldname,
                                _id = "%s_%s" % (tablename, fieldname),
@@ -8119,6 +8126,27 @@ class S3PasswordWidget(FormWidget):
                    )
 
 # =============================================================================
+class S3PhoneWidget(StringWidget):
+    """
+        Extend the default Web2Py widget to ensure that the + is at the
+        beginning not the end in RTL.
+        Adds class to be acted upon by S3.js
+    """
+
+    def __call__(self, field, value, **attributes):
+
+        default = dict(
+            value = (value is not None and str(value)) or "",
+            )
+
+        attr = StringWidget._attributes(field, default, **attributes)
+        attr["_class"] = "string phone-widget"
+
+        widget = INPUT(**attr)
+
+        return widget
+
+# =============================================================================
 def s3_comments_widget(field, value, **attr):
     """
         A smaller-than-normal textarea
@@ -8129,6 +8157,7 @@ def s3_comments_widget(field, value, **attr):
         _id = "%s_%s" % (field._tablename, field.name)
     else:
         _id = attr["_id"]
+
     if "_name" not in attr:
         _name = field.name
     else:

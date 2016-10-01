@@ -23,10 +23,12 @@
          * Default options
          *
          * @prop {string} ajaxURL - URL for dashboard agent Ajax requests
+         * @prop {string} version - the current config version key
          */
         options: {
 
-            ajaxURL: null
+            ajaxURL: null,
+            version: null
 
         },
 
@@ -41,7 +43,7 @@
             dashboardID += 1;
 
             // Namespace for events
-            this.namespace = '.dashboard';
+            this.eventNamespace = '.dashboard';
         },
 
         /**
@@ -53,9 +55,10 @@
 
             this.refresh();
 
-            // @todo: remove
+            // @todo: remove?
             s3_debug("dashboard initialized");
             s3_debug("dashboard ajaxURL=" + this.options.ajaxURL);
+            s3_debug("dashboard version=" + this.options.version);
         },
 
         /**
@@ -87,7 +90,7 @@
         configMode: function(mode) {
 
             var el = this.element,
-                ns = this.namespace,
+                ns = this.eventNamespace,
                 modeSwitch = $('.db-config');
 
             if (typeof mode === 'undefined') {
@@ -135,11 +138,34 @@
         },
 
         /**
+         * Helper method to update the version key for the dashboard
+         * and all its active widgets
+         *
+         * @param {string} version: the version key
+         */
+        updateVersion: function(version) {
+
+            var el = this.element;
+
+            // Update version key
+            this._setOption('version', version);
+
+            // @todo: remove?
+            s3_debug("dashboard new version=" + version);
+
+            // Also update version key in all widgets
+            el.find('.db-widget').each(function() {
+                $(this).dashboardWidget('option', 'version', version);
+            });
+        },
+
+        /**
          * Bind events to generated elements (after refresh)
          */
         _bindEvents: function() {
 
-            var ns = this.namespace,
+            var el = this.element,
+                ns = this.eventNamespace,
                 self = this;
 
             // Config mode switches
@@ -150,6 +176,21 @@
                 self.configMode(false);
             });
 
+            // Config saved => update version key
+            el.bind('configSaved' + ns, function(e, data) {
+
+                // Prevent configSaved event from bubbling further up
+                e.stopPropagation();
+
+                var version = null;
+                if (data && data.hasOwnProperty('v')) {
+                    version = data.v;
+                }
+                if (version) {
+                    self.updateVersion(version);
+                }
+            });
+
             return true;
         },
 
@@ -158,7 +199,7 @@
          */
         _unbindEvents: function() {
 
-            var ns = this.namespace;
+            var ns = this.eventNamespace;
 
             $('.dashboard-config').unbind(ns);
 
@@ -182,9 +223,16 @@
         /**
          * Default options
          *
-         * @todo document options
+         * @prop {string} dashboardURL - the URL for dashboard agent requests
+         * @prop {string} version - the config version key
+         * @prop {string} title - the widget title (used in config dialog,
+         *                        configured in back-end widget class)
          */
         options: {
+
+            dashboardURL: null,
+            version: null,
+            title: 'Dashboard Widget'
 
         },
 
@@ -195,6 +243,9 @@
 
             this.id = dashboardWidgetID;
             dashboardWidgetID += 1;
+
+            // Namespace for events
+            this.eventNamespace = '.dashboardWidget';
         },
 
         /**
@@ -204,9 +255,16 @@
 
             var el = $(this.element);
 
+            // Get the agent ID
+            this.agentID = el.attr('id');
+
+            // Identify the config-bar
+            this.configBar = el.find('.db-configbar');
+
+            // Refresh the widget contents
             this.refresh();
 
-            // @todo: remove
+            // @todo: remove?
             s3_debug("dashboard widget initialized");
         },
 
@@ -228,10 +286,37 @@
 
             this._unbindEvents();
 
-            // Identify the config-bar
-            this.configBar = el.find('.db-configbar');
-
             this._bindEvents();
+        },
+
+        /**
+         * Actions after widget config settings have changed
+         *
+         * @param {object} newConfig - the new widget config
+         */
+        _onConfigUpdate: function(newConfig) {
+
+            var el = $(this.element);
+
+            // Generic widget can update directly from newConfig,
+            // no need to Ajax-reload anything (other widget
+            // classes may have to, though - and then this is the
+            // right place to do it)
+            if (newConfig && newConfig.hasOwnProperty('xml')) {
+
+                // Remove everything except config bars
+                el.children(':not(.db-configbar)').remove();
+
+                // Insert the new XML after the top-most config bar
+                var xmlStr = newConfig.xml;
+                if (xmlStr) {
+                    this.configBar.first().after(xmlStr);
+                }
+            }
+
+            // Refresh widget (this should always be done after
+            // updating elements or DOM tree of the widget)
+            this.refresh();
         },
 
         /**
@@ -257,9 +342,103 @@
         },
 
         /**
+         * Render the config dialog
+         */
+        _configDialog: function() {
+
+            var el = $(this.element),
+                ns = this.eventNamespace,
+                opts = this.options,
+                self = this;
+
+            if (!$('.db-config-dialog').length) {
+
+                // Construct the popup URL
+                var configURL = 'config.popup?agent=' + this.agentID + '&version=' + opts.version,
+                    dashboardURL = opts.dashboardURL;
+                if (dashboardURL) {
+                    configURL = dashboardURL + '/' + configURL;
+                }
+
+                // Construct the iframe
+                var iframeID = this.agentID + '-dialog',
+                    dialog = $('<iframe>', {
+                    'id': iframeID,
+                    'src': '',
+                    'class': 'loading',
+                    'load': function() {
+                        $(this).removeClass('loading');
+                        var width = $('.ui-dialog').width();
+                        $('#' + iframeID).width(width).contents().find('#popup form').show();
+                    },
+                    'marginWidth': '0',
+                    'marginHeight': '0',
+                    'frameBorder': '0'
+                }).appendTo('body');
+
+                this.configDialog = dialog;
+
+                // Instantiate the dialog
+                dialog.dialog({
+                    autoOpen: false,
+                    modal: true,
+                    minWidth: 320,
+                    minHeight: 480,
+                    title: opts.title,
+                    open: function() {
+                        // Clicking outside of the dialog closes it
+                        $('.ui-widget-overlay').one('click' + ns, function() {
+                            dialog.dialog('close');
+                        });
+                        // Highlight the widget this dialog belongs to
+                        el.addClass('db-has-dialog');
+                    },
+                    close: function() {
+                        dialog.attr('src', '');
+                        el.removeClass('db-has-dialog');
+                        self.configDialog.remove();
+                        self.configDialog = null;
+                    }
+                });
+
+                // Set iframe source and open the dialog
+                dialog.attr('src', configURL).dialog('open');
+            }
+        },
+
+        /**
          * Bind events to generated elements (after refresh)
          */
         _bindEvents: function() {
+
+            var el = $(this.element),
+                ns = this.eventNamespace,
+                self = this;
+
+            // ConfigBar actions
+            this.configBar.find('.db-task-config').on('click' + ns, function() {
+                self._configDialog();
+            });
+
+            // Actions after successful config update
+            el.bind('configSaved' + ns, function(e, data) {
+
+                // New config returned from form processing?
+                var newConfig = null;
+                if (data && data.hasOwnProperty('c')) {
+                    newConfig = data.c;
+                }
+
+                // Reload/refresh widget as necessary
+                self._onConfigUpdate(newConfig);
+
+                // Close the dialog (will remove the iframe itself)
+                var dialog = self.configDialog;
+                if (dialog) {
+                    dialog.dialog('close');
+                }
+            });
+
             return true;
         },
 
@@ -267,6 +446,14 @@
          * Unbind events (before refresh)
          */
         _unbindEvents: function() {
+
+            var el = $(this.element),
+                ns = this.eventNamespace;
+
+            el.unbind(ns);
+
+            this.configBar.find('.db-task-config').off('click' + ns);
+
             return true;
         }
     });

@@ -37,11 +37,13 @@ __all__ = ("S3Dashboard",
            )
 
 import json
+import uuid
 
 from gluon import *
 
-from s3utils import s3_get_extension
+from s3utils import s3_get_extension, s3_str
 from s3widgets import ICON
+from s3validators import JSONERRORS
 
 DEFAULT = lambda: None
 DEFAULT_FORMAT = "html"
@@ -50,18 +52,18 @@ DEFAULT_FORMAT = "html"
 class S3DashboardContext(object):
     """ Context data for a dashboard """
 
-    def __init__(self, r=None):
+    def __init__(self, r=None, dashboard=None):
         """
             Constructor
 
             @param r: the request object (defaults to current.request)
-
+            @param dashboard: the dashboard (S3Dashboard)
         """
 
         # @todo: add request owner info (to select the active config)
-        # @todo: extract the URL method (like default/dashboard/[method])
 
         # Context variables
+        self.dashboard = dashboard
         self.shared = {}
 
         # Global filters
@@ -94,12 +96,16 @@ class S3DashboardContext(object):
 
             current.log.error(message)
 
-            headers = {"Content-Type":"application/json"}
-            body = current.xml.json_message(success=False,
-                                            statuscode=status,
-                                            message=message,
-                                            )
-
+            if self.representation == "popup":
+                # Display human-readable error message
+                headers = {}
+                body = DIV(message, _style="color:red")
+            else:
+                headers = {"Content-Type":"application/json"}
+                body = current.xml.json_message(success=False,
+                                                statuscode=status,
+                                                message=message,
+                                                )
             raise HTTP(status, body=body, web2py_error=message, **headers)
 
     # -------------------------------------------------------------------------
@@ -210,11 +216,6 @@ class S3DashboardContext(object):
 class S3DashboardConfig(object):
     """
         Dashboard Configuration
-
-        - can load and store configurations (@todo)
-        - can determine the active configuration (@todo)
-        - can parse default configuration
-        - builds the configuration GUI and handles its requests (@todo)
     """
 
     DEFAULT_LAYOUT = "boxes"
@@ -264,6 +265,9 @@ class S3DashboardConfig(object):
             default = []
         self.active_widgets = default
 
+        self.version = None
+        self.next_id = 0
+
         # Is this dashboard user-configurable?
         self.configurable = configurable
         self.loaded = True if not configurable else False
@@ -287,21 +291,98 @@ class S3DashboardConfig(object):
         row = current.db(query).select(table.id,
                                        table.layout,
                                        table.title,
+                                       table.version,
+                                       table.next_id,
                                        table.widgets,
                                        limitby = (0, 1),
                                        ).first()
 
         if row:
+            # Version key and next widget ID
+            self.version = row.version
+            if row.next_id:
+                self.next_id = row.next_id
+
+            # Layout and title
+            self.layout = row.layout
             if row.title:
                 self.title = row.title
 
-            self.layout = row.layout
-
+            # Active widgets
             widgets = row.widgets
             if type(widgets) is list:
                 self.active_widgets = widgets
 
+            # Store record ID
             self.config_id = row.id
+
+        self.loaded = True
+
+    # -------------------------------------------------------------------------
+    def save(self, context, update=None):
+        """
+            Save this configuration in the database
+
+            @param context: the current S3DashboardContext
+            @param update: widget configurations to update, as dict
+                           {widget_id: {config-dict}}
+
+            @return: the new version key, or None if not successful
+        """
+
+        # Must be configurable and loaded
+        if not self.configurable or not self.loaded:
+            return None
+
+        db = current.db
+        table = current.s3db.s3_dashboard
+
+        # Collect the widget configs
+        widgets = self.active_widgets
+
+        # Updated widget configs
+        configs = []
+        for widget in widgets:
+            widget_id = widget.get("widget_id")
+            new_config = update.get(widget_id)
+            if new_config:
+                new_config["widget_id"] = widget_id
+                configs.append(new_config)
+            else:
+                configs.append(widget)
+
+        # Generate a new version key
+        version = uuid.uuid4().get_hex()
+
+        config_id = self.config_id
+        if not config_id:
+            # Create new record
+            data = {"controller": context.controller,
+                    "function": context.function,
+                    "version": version,
+                    "next_id": self.next_id,
+                    "active": True,
+                    "widgets": configs,
+                    }
+            config_id = table.insert(**data)
+            if not config_id:
+                version = None
+            # @todo: call onaccept?
+        else:
+            # Update existing record
+            data = {"version": version,
+                    "next_id": self.next_id,
+                    "widgets": configs,
+                    }
+            success = db(table.id == config_id).update(**data)
+            if not success:
+                version = None
+            # @todo: call onaccept?
+
+        if version:
+            self.version = version
+
+        return version
 
 # =============================================================================
 class S3DashboardChannel(object):
@@ -588,7 +669,7 @@ class S3Dashboard(object):
             config = S3DashboardConfig(config)
         self._config = config
 
-        self.context = S3DashboardContext()
+        self.context = S3DashboardContext(dashboard=self)
 
         available_layouts = dict(self.layouts)
         if layouts:
@@ -630,8 +711,10 @@ class S3Dashboard(object):
             # The current context
             context = self.context
 
+            # Config details
             config_id = config.config_id
             available_widgets = config.available_widgets
+            next_id = config.next_id
 
             agents = self._agents = {}
             for index, widget_config in enumerate(config.active_widgets):
@@ -642,22 +725,32 @@ class S3Dashboard(object):
                 if not widget:
                     continue
 
-                # Identify the widget
+                # Get the widget ID
                 if config_id is None:
-                    agent_id = "db-none-%s" % index
+                    widget_id = next_id
                 else:
-                    agent_id = widget_config.get("agent_id")
+                    widget_id = widget_config.get("widget_id")
+                    if widget_id is None:
+                        widget_id = next_id
+                next_id = max(next_id, widget_id + 1)
+                widget_config["widget_id"] = widget_id
+
+                # Construct the agent ID
+                agent_id = "db-widget-%s" % widget_id
                 if not agent_id:
                     continue
 
                 # Instantiate the agent
                 agent = widget.create_agent(agent_id,
                                             config = widget_config,
+                                            version = config.version,
                                             context = context,
                                             )
 
                 # Register the agent
                 agents[agent_id] = agent
+
+            config.next_id = next_id
 
         return agents
 
@@ -682,6 +775,19 @@ class S3Dashboard(object):
         command = context.command
 
         status, msg = None, None
+
+        # Verify that the requested version matches the current config
+        if agent_id or command or http != "GET":
+            request_version = context.get_vars.get("version")
+            if not request_version:
+                context.error(400,
+                              current.T("Invalid Request URL (version key missing)"),
+                              )
+            if request_version != self.config.version:
+                context.error(409,
+                              current.T("Page configuration has changed, please reload the page"),
+                              _next = URL(args=[], vars={}),
+                              )
 
         if not agent_id:
             # Global request
@@ -719,7 +825,7 @@ class S3Dashboard(object):
             agent = self.agents.get(agent_id)
             if agent:
                 # Call the agent
-                output, error = agent(context)
+                output, error = agent(self, context)
                 if error:
                     status, msg = error
             else:
@@ -766,6 +872,7 @@ class S3Dashboard(object):
         ajax_url = URL(args=[], vars={})
 
         script_options = {"ajaxURL": ajax_url,
+                          "version": config.version,
                           }
 
         # Inject JavaScript
@@ -830,6 +937,12 @@ class S3Dashboard(object):
     # -------------------------------------------------------------------------
     @staticmethod
     def inject_script(dashboard_id, options=None):
+        """
+            Inject the JS to instantiate the client-side widget controller
+
+            @param dashboard_id: the dashboard DOM node ID
+            @param options: JSON-serializable dict with script options
+        """
 
         s3 = current.response.s3
 
@@ -914,7 +1027,7 @@ class S3DashboardAgent(object):
         - manages the widget configuration
     """
 
-    def __init__(self, agent_id, widget=None, config=None):
+    def __init__(self, agent_id, widget=None, config=None, version=None):
         """
             Initialize the agent
 
@@ -922,18 +1035,21 @@ class S3DashboardAgent(object):
                              identifier for the widget configuration
             @param widget: the widget (S3DashboardWidget instance)
             @param config: the widget configuration (dict)
+            @param version: the config version
         """
 
         self.agent_id = agent_id
         self.widget = widget
 
         self.config = config
+        self.version = version
 
     # -------------------------------------------------------------------------
-    def __call__(self, context):
+    def __call__(self, dashboard, context):
         """
             Dispatch Ajax requests
 
+            @param dashboard: the calling S3Dashboard instance
             @param context: the current S3DashboardContext
 
             @return: tuple (output, error), where:
@@ -948,9 +1064,14 @@ class S3DashboardAgent(object):
         error = None
 
         if command:
-            if command in ("config", "authorize"):
-                # Agent command
-                # @todo: implement agent commands
+            if command == "config":
+                if representation == "popup":
+                    output = self.configure(dashboard, context)
+                else:
+                    error = (415, current.ERROR.BAD_FORMAT)
+            elif command == "authorize":
+                # Placeholder for agent command
+                # @todo: implement authorize-action
                 error = (501, current.ERROR.NOT_IMPLEMENTED)
             else:
                 # Delegated command
@@ -1009,6 +1130,7 @@ class S3DashboardAgent(object):
         # Produce the contents XML
         contents = prototype.widget(self.agent_id,
                                     config,
+                                    version = self.version,
                                     context = context,
                                     )
 
@@ -1035,21 +1157,113 @@ class S3DashboardAgent(object):
                           position=position,
                           )
 
+    # -------------------------------------------------------------------------
+    def configure(self, dashboard, context):
+        """
+            Controller for the widget configuration dialog
+
+            @param dashboard: the calling S3Dashboard instance
+            @param context: the S3DashboardContext
+
+            @return: output dict for the view
+        """
+
+        response = current.response
+        s3 = response.s3
+
+        # Get the form fields from the widget class
+        prototype = self.widget
+        formfields = prototype.configure(self)
+
+        # The current configuration as formdata
+        formdata = dict(self.config)
+        formdata["id"] = 0
+
+        # Form buttons
+        T = current.T
+        submit_btn = INPUT(_class = "tiny primary button submit-btn",
+                           _name = "submit",
+                           _type = "submit",
+                           _value = T("Submit"),
+                           )
+        buttons = [submit_btn]
+
+        # Construct the form
+        settings = s3.crud
+        formstyle = settings.formstyle
+        form = SQLFORM.factory(*formfields,
+                               record = formdata,
+                               showid = False,
+                               formstyle = formstyle,
+                               table_name = "config",
+                               upload = s3.download_url,
+                               separator = "",
+                               submit_button = settings.submit_button,
+                               buttons = buttons)
+
+        # Process the form
+        formname = "config/%s" % self.agent_id
+        if form.accepts(context.post_vars,
+                        current.session,
+                        onvalidation = prototype.validate_config,
+                        formname = formname,
+                        keepvalues = False,
+                        hideerror = False,
+                        ):
+
+            # Get an updated config dict from the widget
+            widget_config = self.config
+            widget_id = widget_config.get("widget_id")
+
+            new_config = prototype.accept_config(widget_config, form)
+
+            # Pass new config to client via s3.popup_data
+            popup_data = {"c": new_config}
+
+            # Save the new config and add the new version key to the popup_data
+            if dashboard:
+                version = dashboard.config.save(context, {widget_id: new_config})
+                if version:
+                    popup_data["v"] = version
+
+            # Using JSON serializer rather than raw json.dumps to catch T()'s
+            from gluon.serializers import json as jsons
+            s3.popup_data = jsons(popup_data)
+
+            # Send a confirmation so the popup gets closed
+            # (layout.html diverts to layout_popup.html with
+            # "popup" request format + response.confirmation)
+            response.confirmation = T("Configuration updated")
+
+        # Set view (@todo: implement specific view?)
+        response.view = "popup.html"
+
+        return {# Context needed for layout.html to determine
+                # the representation format:
+                "r": context,
+                "form": form,
+                }
+
 # =============================================================================
 class S3DashboardWidget(object):
     """
         Base class for dashboard widgets
     """
 
+    title = "Dashboard Widget"
+
     # -------------------------------------------------------------------------
     # Methods to be implemented by subclasses
     # -------------------------------------------------------------------------
-    def widget(self, agent_id, config, context=None):
+    def widget(self, agent_id, config, version=None, context=None):
         """
             Construct the XML for this widget
 
-            @param context: the S3DashboardContext
+            @param agent_id: the agent ID (same as the DOM node ID of the
+                             outer wrapper DIV, to attach scripts)
             @param config: the active widget configuration
+            @param version: the config version key
+            @param context: the S3DashboardContext
 
             @return: an XmlComponent with the widget contents,
                      the outer DIV will be added by the agent
@@ -1059,7 +1273,7 @@ class S3DashboardWidget(object):
         contents = config.get("xml", "")
 
         # Inject the JavaScript components
-        self.inject_script(agent_id)
+        self.inject_script(agent_id, version=version)
 
         return XML(contents)
 
@@ -1084,10 +1298,61 @@ class S3DashboardWidget(object):
         return None
 
     # -------------------------------------------------------------------------
+    def configure(self, agent):
+        """
+            Get widget-specific configuration form fields
+
+            @param agent: the agent
+
+            @return: a list of Fields for the form construction
+        """
+
+        # Generic widget allows configuration of XML
+        formfields = [Field("xml", "text",
+                            label = "XML",
+                            ),
+                      ]
+
+        return formfields
+
+    # -------------------------------------------------------------------------
+    def accept_config(self, config, form):
+        """
+            Extract the new config settings from the form and
+            update the config dict
+
+            @param config: the config dict
+            @param form: the configuration form
+
+            @return: the updated config dict (can be a replacement)
+
+            NB config must remain JSON-serializable
+        """
+
+        formvars = form.vars
+
+        xml = formvars.get("xml")
+        if xml is not None:
+            config["xml"] = xml
+
+        return config
+
+    # -------------------------------------------------------------------------
+    def validate_config(self, form):
+        """
+            Validation function for configuration form
+        """
+
+        # Generic widget has nothing to validate
+        pass
+
+    # -------------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------------
-    @staticmethod
-    def inject_script(agent_id,
+    @classmethod
+    def inject_script(cls,
+                      agent_id,
+                      version=None,
                       widget_class="dashboardWidget",
                       options=None):
         """
@@ -1095,6 +1360,7 @@ class S3DashboardWidget(object):
             usually called by widget() method.
 
             @param agent_id: the agent ID
+            @param version: the config version key
             @param widget_class: the widget class to instantiate
             @param options: JSON-serializable dict of options to pass
                             to the widget instance
@@ -1106,6 +1372,19 @@ class S3DashboardWidget(object):
             return
         if not options:
             options = {}
+
+        # Add the widget title (for the configuration popup)
+        title = cls.title
+        if title:
+            options["title"] = s3_str(current.T(title))
+
+        # Add the dashboard URL
+        dashboard_url = URL(args=[], vars={})
+        options["dashboardURL"] = dashboard_url
+
+        # Add the config version key
+        options["version"] = version
+
         script = """$("#%(agent_id)s").%(widget_class)s(%(options)s)""" % \
                     {"agent_id": agent_id,
                      "widget_class": widget_class,
@@ -1122,11 +1401,11 @@ class S3DashboardWidget(object):
             @return: the XML for the task bar
         """
 
-        return DIV(SPAN(ICON("move"),
+        return DIV(SPAN(ICON("move", _class="db-task-move"),
                         _class="db-configbar-left",
                         ),
-                   SPAN(ICON("delete"),
-                        ICON("settings"),
+                   SPAN(ICON("delete", _class="db-task-delete"),
+                        ICON("settings", _class="db-task-config"),
                         _class="db-configbar-right",
                         ),
                    _class = "db-configbar",
@@ -1172,12 +1451,14 @@ class S3DashboardWidget(object):
         self.script_loaded = False
 
     # -------------------------------------------------------------------------
-    def create_agent(self, agent_id, config=None, context=None):
+    def create_agent(self, agent_id, config=None, version=None, context=None):
         """
             Create an agent for this widget
 
             @param agent_id: the agent ID
-            @param config: the agent configuration
+            @param config: the agent configuration dict
+            @param version: the config version key
+            @param context: the current S3DashboardContext
         """
 
         # Add widget defaults to configuration
@@ -1190,11 +1471,13 @@ class S3DashboardWidget(object):
         if agent:
             # Update the agent configuration
             agent.config = agent_config
+            agent.version = version
         else:
             # Create a new agent
             agent = S3DashboardAgent(agent_id,
                                      widget=self,
                                      config=agent_config,
+                                     version=version,
                                      )
             self.agents[agent_id] = agent
 

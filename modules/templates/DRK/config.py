@@ -794,6 +794,8 @@ def config(settings):
     # -------------------------------------------------------------------------
     # DVR Module Settings and Customizations
     #
+    # Uncomment this to enable tracking of transfer origin/destination sites
+    settings.dvr.track_transfer_sites = True
     # Uncomment this to enable features to manage transferability of cases
     settings.dvr.manage_transferability = True
     # Uncomment this to enable household size in cases, set to "auto" for automatic counting
@@ -1000,12 +1002,6 @@ def config(settings):
                               )
                 else:
                     absence_field = None
-
-                # Enable origin and destination site fields
-                field = ctable.origin_site_id
-                field.readable = field.writable = True
-                field = ctable.destination_site_id
-                field.readable = field.writable = True
 
                 # Expose expiration dates
                 field = ctable.valid_until
@@ -2028,9 +2024,238 @@ def config(settings):
     settings.customise_dvr_allowance_controller = customise_dvr_allowance_controller
 
     # -------------------------------------------------------------------------
+    def case_event_create_onaccept(form):
+        """
+            Custom onaccept-method for case events to set the quantity in
+            "FOOD" events to the current household size
+
+            @param form: the Form
+        """
+
+        # Get form.vars.id
+        formvars = form.vars
+        try:
+            record_id = formvars.id
+        except AttributeError:
+            record_id = None
+        if not record_id:
+            return
+
+        # Get the person ID and event type code
+        db = current.db
+        s3db = current.s3db
+        ttable = s3db.dvr_case_event_type
+        etable = s3db.dvr_case_event
+
+        query = (etable.id == record_id) & \
+                (ttable.id == etable.type_id)
+        row = db(query).select(etable.person_id,
+                               ttable.code,
+                               limitby = (0, 1),
+                               ).first()
+        if not row:
+            return
+        event_code = row[ttable.code]
+        person_id = row[etable.person_id]
+
+        # Check event type code and update quantity as required
+        if event_code == "FOOD":
+
+            # Get current household size
+            adults, children = s3db.dvr_get_household_size(person_id,
+                                                           formatted=False,
+                                                           )
+            household_size = adults + children
+
+            # Update quantity
+            if household_size > 1:
+                query = (etable.id == record_id)
+                db(query).update(quantity=float(household_size))
+
+    # -------------------------------------------------------------------------
+    def customise_dvr_case_event_resource(r, tablename):
+
+        resource = current.s3db.resource("dvr_case_event")
+
+        # Get the current create_onaccept setting
+        hook = "create_onaccept"
+        callback = resource.get_config(hook)
+
+        # Fall back to generic onaccept
+        if not callback:
+            hook = "onaccept"
+            callback = resource.get_config(hook)
+
+        # Extend with custom onaccept
+        custom_onaccept = case_event_create_onaccept
+        if callback:
+            if isinstance(callback, (tuple, list)):
+                callback = list(callback) + [custom_onaccept]
+            else:
+                callback = [callback, custom_onaccept]
+        else:
+            callback = custom_onaccept
+        resource.configure(**{hook: callback})
+
+    settings.customise_dvr_case_event_resource = customise_dvr_case_event_resource
+
+    # -------------------------------------------------------------------------
+    def case_event_date_day(row):
+        """
+            Field method to reduce case event date/time to just date,
+            used in pivot table reports to group case events by day
+        """
+
+        if hasattr(row, "dvr_case_event"):
+            row = row.dvr_case_event
+        try:
+            date = row.date
+        except AttributeError:
+            date = None
+        if date:
+            # Get local hour
+            from dateutil import tz
+            date = date.replace(tzinfo=tz.gettz("UTC"))
+            date = date.astimezone(tz.gettz("Europe/Berlin"))
+            hour = date.time().hour
+
+            # Convert to date
+            date = date.date()
+            if hour <= 7:
+                # Map early hours to previous day
+                return date - datetime.timedelta(days=1)
+        else:
+            date = None
+        return date
+
+    def case_event_date_day_represent(value):
+        """
+            Representation method for case_event_date_day, needed in order
+            to sort pivot axis values by raw date, but show them in locale
+            format (default DD.MM.YYYY, doesn't sort properly).
+        """
+
+        from s3 import S3DateTime
+        return S3DateTime.date_represent(value, utc=True)
+
+    def case_event_time_of_day(row):
+        """
+            Field method to group events by time of day
+        """
+
+        if hasattr(row, "dvr_case_event"):
+            row = row.dvr_case_event
+        try:
+            date = row.date
+        except AttributeError:
+            date = None
+        if date:
+            from dateutil import tz
+            date = date.replace(tzinfo=tz.gettz("UTC"))
+            date = date.astimezone(tz.gettz("Europe/Berlin"))
+            hour = date.time().hour
+
+            if 7 <= hour < 11:
+                tod = "07:00 - 11:00"
+            elif 11 <= hour < 15:
+                tod = "11:00 - 15:00"
+            else:
+                tod = "15:00 - 07:00"
+        else:
+            tod = "-"
+        return tod
+
+    def case_event_report_default_filters(event_code=None):
+        """
+            Set default filters for case event report
+
+            @param event_code: code for the default event type
+        """
+
+        from s3 import s3_set_default_filter
+
+        if event_code:
+            ttable = current.s3db.dvr_case_event_type
+            query = (ttable.code == event_code) & \
+                    (ttable.deleted != True)
+            row = current.db(query).select(ttable.id,
+                                           limitby = (0, 1),
+                                           ).first()
+            if row:
+                s3_set_default_filter("~.type_id",
+                                      row.id,
+                                      tablename = "dvr_case_event",
+                                      )
+
+        # Minimum date: one week
+        WEEK_AGO = datetime.datetime.now() - \
+                    datetime.timedelta(days=7)
+        min_date = WEEK_AGO.replace(hour=8, minute=0, second=0)
+
+        s3_set_default_filter("~.date",
+                              {"ge": min_date,
+                               },
+                              tablename = "dvr_case_event",
+                              )
+
+    # -------------------------------------------------------------------------
     def customise_dvr_case_event_controller(**attr):
 
         s3 = current.response.s3
+
+        standard_prep = s3.prep
+        def custom_prep(r):
+            # Call standard prep
+            if callable(standard_prep):
+                result = standard_prep(r)
+            else:
+                result = True
+
+            resource = r.resource
+            table = resource.table
+
+            if r.method == "report":
+                # Set report default filters
+                event_code = r.get_vars.get("code")
+                case_event_report_default_filters(event_code)
+
+                # Field method for day-date of events
+                from s3 import s3_fieldmethod
+                table.date_day = s3_fieldmethod(
+                                    "date_day",
+                                    case_event_date_day,
+                                    represent = case_event_date_day_represent,
+                                    )
+                table.date_tod = s3_fieldmethod(
+                                    "date_tod",
+                                    case_event_time_of_day,
+                                    )
+
+                # Pivot axis options
+                report_axes = [(T("Date"), "date_day"),
+                               (T("Time of Day"), "date_tod"),
+                               "type_id",
+                               "created_by",
+                               ]
+
+                # Configure report options
+                report_options = {
+                    "rows": report_axes,
+                    "cols": report_axes,
+                    "fact": [(T("Total Quantity"), "sum(quantity)"),
+                             #(T("Number of Events"), "count(id)"),
+                             ],
+                    "defaults": {"rows": "date_day",
+                                 "cols": "date_tod",
+                                 "fact": "sum(quantity)",
+                                 "totals": True,
+                                 },
+                    }
+                resource.configure(report_options = report_options,
+                                   extra_fields = ["date"],
+                                   )
+            return result
+        s3.prep = custom_prep
 
         # Custom postp
         standard_postp = s3.postp

@@ -202,12 +202,38 @@ S3.addModals = function() {
                 //select.css('z-index', 1049);
             }
         }
-        var id = S3.uid();
-        // Open a jQueryUI Dialog showing a spinner until iframe is loaded
-        var dialog = $('<iframe id="' + id + '" src=' + url + ' onload="S3.popup_loaded(\'' + id + '\')" class="loading" marginWidth="0" marginHeight="0" frameBorder="0"></iframe>')
-                      .appendTo('body');
+
+        // Create an iframe
+        var id = S3.uid(),
+            dialog = $('<iframe>', {
+                'id': id,
+                // Start empty to prevent contents reload at
+                // DOM re-insertion (=unnecessary HTTP request)
+                'src': '',
+                // Set initial 'loading' class to show spinner until contents loaded
+                'class': 'loading',
+                'load': function(event, ui) {
+                    S3.popup_loaded(id);
+                },
+                'marginWidth': '0',
+                'marginHeight': '0',
+                'frameBorder': '0'
+            }).appendTo('body');
+
+        // Create jQuery UI dialog
         dialog.dialog({
-            // add a close listener to prevent adding multiple divs to the document
+            autoOpen: false,
+            title: title,
+            minHeight: 480,
+            minWidth: 320,
+            modal: true,
+            closeText: '',
+            open: function(event, ui) {
+                // Clicking outside of the popup closes it
+                $('.ui-widget-overlay').bind('click', function() {
+                    dialog.dialog('close');
+                });
+            },
             close: function(event, ui) {
                 if (self.parent) {
                     // There is a parent modal: refresh it to fix layout
@@ -218,20 +244,15 @@ S3.addModals = function() {
                         iframe.width(width);
                     }, 300);
                 }
-                // remove div with all data and events
-                dialog.remove();
+                // Clear src to prevent DOM manipulation from triggering
+                // post-close contents reload (=unnecessary HTTP request)
+                dialog.attr('src', '').remove();
             },
-            minHeight: 480,
-            modal: true,
-            open: function(event, ui) {
-                $('.ui-widget-overlay').bind('click', function() {
-                    dialog.dialog('close');
-                });
-            },
-            title: title,
-            minWidth: 320,
-            closeText: ''
         });
+
+        // Only now set the iframe source URL and open the dialog
+        dialog.attr('src', url).dialog('open');
+
         // Prevent browser from following link
         return false;
     });
@@ -1763,6 +1784,15 @@ S3.reloadWithQueryStringVars = function(queryStringVars) {
             }
         });
 
+        // T2 Layer
+        //try { $('.zoom').fancyZoom( {
+        //    scaleImg: true,
+        //    closeOnClick: true,
+        //    directory: S3.Ap.concat('/static/media')
+        //}); } catch(e) {}
+
+        // S3 Layer
+
         // If a form is submitted with errors, this will scroll
         // the window to the first form error message
         var inputErrorId = $('form .error[id]').eq(0).attr('id');
@@ -1775,14 +1805,6 @@ S3.reloadWithQueryStringVars = function(queryStringVars) {
             } catch(e) {}
         }
 
-        // T2 Layer
-        //try { $('.zoom').fancyZoom( {
-        //    scaleImg: true,
-        //    closeOnClick: true,
-        //    directory: S3.Ap.concat('/static/media')
-        //}); } catch(e) {}
-
-        // S3 Layer
         // dataTables' delete button
         // (can't use S3.confirmClick as the buttons haven't yet rendered)
         if (S3.interactive) {
@@ -1817,6 +1839,20 @@ S3.reloadWithQueryStringVars = function(queryStringVars) {
         $('input[name="first_name"]').focusout(function() {
             this.value = this.value.charAt(0).toLocaleUpperCase() + this.value.substring(1);
         });
+
+        // Ensure that phone fields appear with + at beginning not end in RTL
+        if (S3.rtl) {
+            $('.phone-widget').each(function() {
+                if (this.value && (this.value.charAt(0) != '\u200E')) {
+                    this.value = '\u200E' + this.value;
+                };
+            });
+            $('.phone-widget').focusout(function() {
+                if (this.value.charAt(0) != '\u200E') {
+                    this.value = '\u200E' + this.value;
+                };
+            });
+        };
 
         // ListCreate Views
         $('#show-add-btn').click(function() {

@@ -334,9 +334,9 @@ $('#login-btn').click(function(){
     # Feed Control
     rss = settings.frontpage.rss
     if rss:
-        s3.external_stylesheets.append("http://www.google.com/uds/solutions/dynamicfeed/gfdynamicfeedcontrol.css")
-        s3.scripts.append("http://www.google.com/jsapi?key=notsupplied-wizard")
-        s3.scripts.append("http://www.google.com/uds/solutions/dynamicfeed/gfdynamicfeedcontrol.js")
+        s3.external_stylesheets.append("//www.google.com/uds/solutions/dynamicfeed/gfdynamicfeedcontrol.css")
+        s3.scripts.append("//www.google.com/jsapi?key=notsupplied-wizard")
+        s3.scripts.append("//www.google.com/uds/solutions/dynamicfeed/gfdynamicfeedcontrol.js")
 
         feeds = ["{title:'%s',url:'%s'}" % (feed["title"], feed["url"])
                  for feed in rss
@@ -928,7 +928,7 @@ def skill():
     """
         RESTful CRUD controller
         - needed when skill add form embedded in default/person
-        - only create method is allowed, when opened in a inline form.
+        - only create method is allowed, when opened in an inline form.
     """
 
     # Check if it is called from a inline form
@@ -1029,8 +1029,10 @@ def about():
         get_vars = {"module": module, "resource": resource}
 
         if item:
+            from s3 import S3XMLContents
+            contents = S3XMLContents(item.body)
             if ADMIN:
-                item = DIV(XML(item.body),
+                item = DIV(contents,
                            BR(),
                            A(T("Edit"),
                              _href=URL(c="cms", f="post",
@@ -1039,7 +1041,7 @@ def about():
                                        ),
                              _class="action-btn"))
             else:
-                item = DIV(XML(item.body))
+                item = DIV(contents)
         elif ADMIN:
             if s3.crud.formstyle == "bootstrap":
                 _class = "btn"
@@ -1059,7 +1061,8 @@ def about():
     response.title = T("About")
 
     # Technical Support Details
-    if settings.get_security_version_info_requires_login() and \
+    if not settings.get_security_version_info() or \
+       settings.get_security_version_info_requires_login() and \
        not auth.s3_logged_in():
 
         return dict(details = "",

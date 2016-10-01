@@ -790,6 +790,17 @@ def s3_comments_represent(text, show_link=True):
         return represent
 
 # =============================================================================
+def s3_phone_represent(value):
+    """
+        Ensure that Phone numbers always show as LTR
+        - otherwise + appears at the end which looks wrong even in RTL
+    """
+
+    if not value:
+        return current.messages["NONE"]
+    return "%s%s" % (unichr(8206), s3_unicode(value))
+
+# =============================================================================
 def s3_url_represent(url):
     """
         Make URLs clickable
@@ -2564,6 +2575,38 @@ class S3MultiPath:
                 return True
             else:
                 return False
+
+# =============================================================================
+def s3_fieldmethod(name, f, represent=None):
+    """
+        Helper to attach a representation method to a Field.Method.
+
+        @param name: the field name
+        @param f: the field method
+        @param represent: the representation function
+    """
+
+    from gluon import Field
+
+    if represent is not None:
+
+        class Handler(object):
+            def __init__(self, method, row):
+                self.method=method
+                self.row=row
+            def __call__(self, *args, **kwargs):
+                return self.method(self.row, *args, **kwargs)
+        if hasattr(represent, "bulk"):
+            Handler.represent = represent
+        else:
+            Handler.represent = staticmethod(represent)
+
+        fieldmethod = Field.Method(name, f, handler=Handler)
+
+    else:
+        fieldmethod = Field.Method(name, f)
+
+    return fieldmethod
 
 # =============================================================================
 class S3MarkupStripper(HTMLParser.HTMLParser):

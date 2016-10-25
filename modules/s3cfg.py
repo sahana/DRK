@@ -122,8 +122,11 @@ class S3Config(Storage):
         self.cms = Storage()
         self.cr = Storage()
         self.database = Storage()
+        self.dc = Storage()
         self.deploy = Storage()
+        self.doc = Storage()
         self.dvr = Storage()
+        self.edu = Storage()
         self.event = Storage()
         self.evr = Storage()
         self.fin = Storage()
@@ -145,6 +148,7 @@ class S3Config(Storage):
         self.log = Storage()
         self.mail = Storage()
         self.member = Storage()
+        self.mobile = Storage()
         self.msg = Storage()
         self.org = Storage()
         self.pr = Storage()
@@ -394,6 +398,13 @@ class S3Config(Storage):
         """
         return self.auth.get("hmac_key", "akeytochange")
 
+    def get_auth_password_changes(self):
+        """
+            Are password changes allowed?
+            - set to False if passwords are being managed externally (OpenID / SMTP / LDAP)
+        """
+        return self.auth.get("password_changes", True)
+
     def get_auth_password_min_length(self):
         """
             To set the Minimum Password Length
@@ -403,6 +414,10 @@ class S3Config(Storage):
     def get_auth_gmail_domains(self):
         """ List of domains which can use GMail SMTP for Authentication """
         return self.auth.get("gmail_domains", [])
+
+    def get_auth_office365_domains(self):
+        """ List of domains which can use Office 365 SMTP for Authentication """
+        return self.auth.get("office365_domains", [])
 
     def get_auth_google(self):
         """
@@ -2484,6 +2499,13 @@ class S3Config(Storage):
         """
         return self.cap.get("use_ack", False)
 
+    def get_cap_alert_hub_title(self):
+        """
+            Title for the Alert Hub Page
+        """
+
+        return self.cap.get("alert_hub_title", current.T("SAMBRO Alert Hub Common Operating Picture"))
+
     # -------------------------------------------------------------------------
     # CMS: Content Management System
     #
@@ -2636,6 +2658,18 @@ class S3Config(Storage):
         return self.cr.get("tags", False)
 
     # -------------------------------------------------------------------------
+    # DC: Data Collection
+    #
+    def get_dc_collection_label(self):
+        """
+            Label for Data Collections
+            - default: 'Data Collection'
+            - 'Survey'
+            - 'Assessment;
+        """
+        return self.dc.get("collection_label", "Assessment")
+
+    # -------------------------------------------------------------------------
     # Deployments
     #
     def get_deploy_cc_groups(self):
@@ -2687,6 +2721,15 @@ class S3Config(Storage):
         return self.deploy.get("team_label", "Deployable")
 
     # -------------------------------------------------------------------------
+    # Doc Options
+    #
+    def get_doc_label(self):
+        """
+            label for Document/Attachment
+        """
+        return self.doc.get("label", "Document")
+
+    # -------------------------------------------------------------------------
     # DVR Options
     #
     def get_dvr_label(self):
@@ -2718,6 +2761,12 @@ class S3Config(Storage):
             Enable features to manage transferability of cases
         """
         return self.dvr.get("manage_transferability", False)
+
+    def get_dvr_case_flags(self):
+        """
+            Enable features to manage case flags
+        """
+        return self.dvr.get("case_flags", False)
 
     def get_dvr_household_size(self):
         """
@@ -2786,6 +2835,22 @@ class S3Config(Storage):
         """
         return self.dvr.get("id_code_pattern", None)
 
+    def get_dvr_event_registration_checkin_warning(self):
+        """
+            Whether to warn during event registration when the person
+            is currently not checked-in
+        """
+        return self.dvr.get("event_registration_checkin_warning", False)
+
+    # -------------------------------------------------------------------------
+    # Education
+    #
+    def get_edu_school_code_unique(self):
+        """
+            Validate for Unique School Codes
+        """
+        return self.edu.get("school_code_unique", False)
+
     # -------------------------------------------------------------------------
     # Events
     #
@@ -2796,6 +2861,12 @@ class S3Config(Storage):
             - valid options: "Disaster"
         """
         return self.event.get("label", None)
+
+    def get_event_exercise(self):
+        """
+            Whether Events can be Exercises
+        """
+        return self.event.get("exercise", False)
 
     def get_event_types_hierarchical(self):
         """
@@ -2809,13 +2880,49 @@ class S3Config(Storage):
         """
         return self.event.get("incident_types_hierarchical", False)
 
-    def get_event_incident_impact_tab(self):
+    def get_event_collection_tab(self):
+        """
+            Whether to show the DC collection tab for events
+        """
+        return self.event.get("collection_tab", True)
+
+    def get_event_target_tab(self):
+        """
+            Whether to show the DC target tab for events
+        """
+        return self.event.get("target_tab", True)
+
+    def get_event_impact_tab(self):
+        """
+            Whether to show the impact tab for events
+        """
+        return self.event.get("impact_tab", True)
+
+    def get_incident_impact_tab(self):
         """
             Whether to show the impact tab for incidents
         """
         return self.event.get("incident_impact_tab", False)
 
-    def get_event_incident_teams_tab(self):
+    def get_event_dispatch_tab(self):
+        """
+            Whether to show the dispatch tab for events
+        """
+        if self.has_module("msg"):
+            return self.event.get("dispatch_tab", False)
+        else:
+            return False
+
+    def get_incident_dispatch_tab(self):
+        """
+            Whether to show the dispatch tab for incidents
+        """
+        if self.has_module("msg"):
+            return self.event.get("incident_dispatch_tab", True)
+        else:
+            return False
+
+    def get_incident_teams_tab(self):
         """
             Show tab with teams assigned for incidents, string to
             define the label of the tab or True to use default label
@@ -2910,12 +3017,25 @@ class S3Config(Storage):
         """
             Label for Organisations in Human Resources
         """
-        return current.T(self.hrm.get("organisation_label", "Organization"))
+
+        label = self.hrm.get("organisation_label")
+        if not label:
+            if self.get_org_branches():
+                label = "Organization / Branch"
+            else:
+                label = "Organization"
+        return current.T(label)
+
+    def get_hrm_root_organisation_label(self):
+        """
+            Label for Root Organisations in Human Resources
+        """
+        return current.T(self.hrm.get("root_organisation_label", "Top-level Organization"))
 
     def get_hrm_email_required(self):
         """
             If set to True then Staff & Volunteers require an email address
-            NB Currently this also acts on Members!
+            NB Currently this also acts on Members & Beneficiaries!
         """
         return self.hrm.get("email_required", True)
 
@@ -2982,13 +3102,6 @@ class S3Config(Storage):
             If set to True then HRM records are deletable rather than just being able to be marked as obsolete
         """
         return self.hrm.get("deletable", True)
-
-    def get_hrm_filter_certificates(self):
-        """
-            If set to True then Certificates are filtered by (Root) Organisation
-            & hence certificates from other Organisations cannot be added to an HR's profile (except by Admins)
-        """
-        return self.hrm.get("filter_certificates", False)
 
     def get_hrm_multiple_job_titles(self):
         """
@@ -3124,6 +3237,28 @@ class S3Config(Storage):
         """
         return self.__lazy("hrm", "use_certificates", default=True)
 
+    def get_hrm_create_certificates_from_courses(self):
+        """
+            If set to True then Certificates are created automatically for each Course
+        """
+        return self.hrm.get("create_certificates_from_courses", False)
+
+    def get_hrm_filter_certificates(self):
+        """
+            If set to True then Certificates are filtered by (Root) Organisation
+            & hence certificates from other Organisations cannot be added to an HR's profile (except by Admins)
+        """
+        return self.hrm.get("filter_certificates", False)
+
+    def get_hrm_use_address(self):
+        """
+            Whether Human Resources should show address tab
+        """
+        use_address = self.hrm.get("use_address", None)
+        # Fall back to PR setting if not specified
+        if use_address is None:
+            return self.get_pr_use_address()
+
     def get_hrm_use_code(self):
         """
             Whether Human Resources should use Staff/Volunteer IDs,
@@ -3158,14 +3293,11 @@ class S3Config(Storage):
         """
         return self.hrm.get("use_id", True)
 
-    def get_hrm_use_address(self):
+    def get_hrm_use_job_titles(self):
         """
-            Whether Human Resources should show address tab
+            Whether Human Resources should show Job Titles
         """
-        use_address = self.hrm.get("use_address", None)
-        # Fall back to PR setting if not specified
-        if use_address is None:
-            return self.get_pr_use_address()
+        return self.hrm.get("use_job_titles", True)
 
     def get_hrm_use_skills(self):
         """
@@ -3187,9 +3319,12 @@ class S3Config(Storage):
 
     def get_hrm_training_instructors(self):
         """
-            Whether to track "internal" training instructors (=persons
-            from the registry), or "external" (=just names), or "both",
-            ...or None (=don't track instructors at all)
+            How training instructors are managed:
+                None: Don't track instructors at all
+                internal: Use persons from the registry
+                external: Just use free-text Names
+                both: Use both fields
+                multiple: Use multiple persons from the registry
         """
         return self.__lazy("hrm", "training_instructors", "external")
 
@@ -3434,6 +3569,31 @@ class S3Config(Storage):
         """
         return self.__lazy("member", "membership_types", default=True)
 
+
+    # -------------------------------------------------------------------------
+    # Mobile Forms
+    #
+    def get_mobile_forms(self):
+        """
+            Configure mobile forms - a list of items, or a callable returning
+            a list of items.
+
+            Item formats:
+                "tablename"
+                ("Title", "tablename")
+                ("Title", "tablename", options)
+
+            Format for options:
+                {
+                    c = controller,      ...use this controller for form handling
+                    f = function,        ...use this function for form handling
+                    vars = vars,         ...add these vars to the download URL
+                 }
+
+            Example:
+                settings.mobile.forms = [("Request", "req_req")]
+        """
+        return self.__lazy("mobile", "forms", [])
 
     # -------------------------------------------------------------------------
     # Organisations
@@ -3907,6 +4067,12 @@ class S3Config(Storage):
         """
         return self.project.get("activities", False)
 
+    def get_project_activity_sectors(self):
+        """
+            Use Sectors in Activities
+        """
+        return self.project.get("activity_sectors", False)
+
     def get_project_activity_types(self):
         """
             Use Activity Types in Activities & Projects
@@ -4035,17 +4201,23 @@ class S3Config(Storage):
         """
         return self.project.get("projects", False)
 
-    def get_project_sectors(self):
-        """
-            Use Sectors in Projects
-        """
-        return self.project.get("sectors", True)
-
     def get_project_programmes(self):
         """
             Use Programmes in Projects
         """
         return self.project.get("programmes", False)
+
+    def get_project_programme_budget(self):
+        """
+            Use Budgets in Programmes
+        """
+        return self.project.get("programme_budget", False)
+
+    def get_project_sectors(self):
+        """
+            Use Sectors in Projects
+        """
+        return self.project.get("sectors", True)
 
     def get_project_themes(self):
         """

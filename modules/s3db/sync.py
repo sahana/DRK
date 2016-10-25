@@ -250,15 +250,6 @@ class SyncDataModel(S3Model):
                            readable = False,
                            writable = False,
                            ),
-                     Field("accept_push", "boolean",
-                           default = False,
-                           label = T("Accept Push"),
-                           represent = s3_yes_no_represent,
-                           comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (
-                                                T("Accept Push"),
-                                                T("Accept unsolicited data transmissions from the repository."))),
-                           ),
                      Field("synchronise_uuids", "boolean",
                            default = False,
                            label = T("Synchronize UUIDs"),
@@ -301,7 +292,6 @@ class SyncDataModel(S3Model):
                   deduplicate = S3Duplicate(),
                   list_fields = ["name",
                                  "uuid",
-                                 "accept_push",
                                  (T("Last Pull"), "last_pull_time"),
                                  (T("Last Push"), "last_push_time"),
                                  ],
@@ -318,11 +308,11 @@ class SyncDataModel(S3Model):
                   )
 
         set_method("sync", "repository",
-                   method="now",
-                   action=sync_now)
+                   method = "now",
+                   action = sync_now)
 
         # Reusable Fields
-        sync_repository_represent = S3Represent(lookup=tablename)
+        sync_repository_represent = S3Represent(lookup = tablename)
         repository_id = S3ReusableField("repository_id", "reference %s" % tablename,
                                         comment = S3PopupLink(c = "sync",
                                                               f = "repository",

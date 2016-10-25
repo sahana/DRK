@@ -93,6 +93,7 @@ class S3DocumentLibrary(S3Model):
                                project_project = T("Project"),
                                project_activity = T("Project Activity"),
                                project_framework = T("Project Framework"),
+                               project_programme = T("Project Programme"),
                                project_task = T("Task"),
                                org_office = T("Office"),
                                org_facility = T("Facility"),
@@ -767,6 +768,11 @@ class S3DocSitRepModel(S3Model):
 
         # Components
         self.add_components(tablename,
+                            event_event = {"link": "event_sitrep",
+                                           "joinby": "sitrep_id",
+                                           "key": "event_id",
+                                           #"actuate": "replace",
+                                           },
                             event_sitrep = {"name": "event_sitrep",
                                             "joinby": "sitrep_id",
                                             },

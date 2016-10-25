@@ -115,6 +115,7 @@ def config(settings):
         #("zh-cn", "中文 (简体)"),
     ])
     settings.cap.languages = languages
+    settings.L10n.languages = languages
     # Translate the cap_area name
     settings.L10n.translate_cap_area = True
 
@@ -181,7 +182,7 @@ def config(settings):
     def customise_msg_rss_channel_controller(**attr):
 
         s3 = current.response.s3
-        table = current.s3db.msg_rss_channel        
+        table = current.s3db.msg_rss_channel
         type = current.request.get_vars.get("type", None)
         if type == "cap":
             # CAP RSS Channel
@@ -219,7 +220,7 @@ def config(settings):
                                                     )
                     restrict_e = [str(row.id) for row in rows if not row.enabled]
                     restrict_d = [str(row.id) for row in rows if row.enabled]
-        
+
                     from s3 import s3_str
                     s3.actions = [dict(label=s3_str(T("Open")),
                                        _class="action-btn edit",
@@ -404,7 +405,7 @@ def config(settings):
                 # Google Cloud Messaging
                 stable = s3db.pr_subscription
                 ctable = s3db.pr_contact
-    
+
                 query = (stable.pe_id == ctable.pe_id) & \
                         (ctable.contact_method == "GCM") & \
                         (ctable.value != None) & \
@@ -573,7 +574,6 @@ def config(settings):
                 table = r.table
                 table.apitype.default = "ftp"
                 table.apitype.readable = table.apitype.writable = False
-                table.accept_push.readable = table.accept_push.writable = False
                 table.synchronise_uuids.readable = \
                                         table.synchronise_uuids.writable = False
                 table.uuid.readable = table.uuid.writable = False
@@ -991,6 +991,7 @@ def config(settings):
         response_type = row["cap_info.response_type"]
         instruction = row["cap_info.instruction"]
         description = row["cap_info.description"]
+        status = row["cap_alert.status"]
 
         if event_type_id and event_type_id != current.messages["NONE"]:
             if not isinstance(event_type_id, lazyT):
@@ -1009,13 +1010,18 @@ def config(settings):
             priority = T("Alert")
 
         email_content = TAG[""](HR(), BR(),
+                         B(s3_str("%s %s %s" % (T(status.upper()),
+                                                T(status.upper()),
+                                                T(status.upper()))))
+                         if status != "Actual" else "",
+                         BR() if status != "Actual" else "",
+                         BR() if status != "Actual" else "",
                          A(T("VIEW ALERT ON THE WEB"),
                            _href = "%s/%s" % (s3_str(row["cap_info.web"]), "profile")),
                          BR(), BR(),
-                         T("%(scope)s %(status)s Alert") % \
-                         {"scope": s3_str(row["cap_alert.scope"]),
-                          "status": s3_str(row["cap_alert.status"]),
-                          },
+                         B(s3_str("%s %s Alert" % (T(row["cap_alert.scope"]),
+                                                   T(status)
+                                                   ))),
                          H2(T(s3_str(get_formatted_value(row["cap_info.headline"],
                                                          system=system)))),
                          BR(),
@@ -1028,7 +1034,7 @@ def config(settings):
                           "area_description": s3_str(get_formatted_value(row["cap_area.name"],
                                                                          system=system)),
                          },
-                         BR(),
+                         BR(), BR(),
                          T("This %(severity)s %(event_type)s is %(urgency)s and is %(certainty)s") %\
                          {"severity": s3_str(row["cap_info.severity"]),
                           "event_type": s3_str(event_type),
@@ -1091,6 +1097,12 @@ def config(settings):
                          {"ack_link": "%s%s" % (current.deployment_settings.get_base_public_url(),
                                                 URL(c="cap", f="alert_ack", args=[ack_id, "update"])),
                           } if ack_id else "",
+                         BR() if ack_id else "",
+                         BR() if ack_id else "",
+                         B(s3_str("%s %s %s" % (T(status.upper()),
+                                                T(status.upper()),
+                                                T(status.upper()))))
+                         if status != "Actual" else "",
                          )
 
         return email_content
@@ -1126,9 +1138,11 @@ def config(settings):
                                   event_type,
                                   priority)
         if len(subject) > 78: # RFC 2822
-            subject = "%s $s %s" % (T("SAHANA"), T("Alert Notification"))
+            subject = "%s %s %s" % (T("SAHANA"),
+                                    current.deployment_settings.get_system_name_short(),
+                                    T("Alert Notification"))
 
-        return subject
+        return s3_str(subject)
 
     # -------------------------------------------------------------------------
     def get_sms_content(row, ack_id=None, system=True):
@@ -1175,7 +1189,7 @@ T("""%(status)s %(message_type)s for %(area_description)s with %(priority)s prio
                  }
         else:
             sms_body = \
-T("""%(status)s %(message_type)s for %(area_description)s with %(priority)s priority %(event_type)s issued by %(sender_name)s at %(date)s (ID:%(identifier)s) \n\n""") % \
+T("""%(status)s %(message_type)s for %(area_description)s with %(priority)s priority %(event_type)s issued by %(sender_name)s at %(date)s (ID:%(identifier)s).  \nView Alert in web at %(profile)s \n\n""") % \
                 {"status": s3_str(row["cap_alert.status"]),
                  "message_type": s3_str(row["cap_alert.msg_type"]),
                  "area_description": s3_str(get_formatted_value(row["cap_area.name"],
@@ -1186,6 +1200,7 @@ T("""%(status)s %(message_type)s for %(area_description)s with %(priority)s prio
                                                            system=system)),
                  "date": s3_str(row["cap_alert.sent"]),
                  "identifier": s3_str(row["cap_alert.identifier"]),
+                 "profile": "%s/%s" % (s3_str(row["cap_info.web"]), "profile"),
                  }
 
         return s3_str(sms_body)

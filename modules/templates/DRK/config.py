@@ -800,6 +800,8 @@ def config(settings):
     settings.dvr.manage_transferability = True
     # Uncomment this to enable household size in cases, set to "auto" for automatic counting
     settings.dvr.household_size = "auto"
+    # Uncomment this to enable features to manage case flags
+    settings.dvr.case_flags = True
     # Uncomment this to expose flags to mark appointment types as mandatory
     settings.dvr.mandatory_appointments = True
     # Uncomment this to have appointments with personal presence update last_seen_on
@@ -814,6 +816,8 @@ def config(settings):
     #settings.dvr.multiple_case_groups = True
     # Configure a regular expression pattern for ID Codes (QR Codes)
     settings.dvr.id_code_pattern = "(?P<label>[^,]*),(?P<family>[^,]*),(?P<last_name>[^,]*),(?P<first_name>[^,]*),(?P<date_of_birth>[^,]*),.*"
+    # Issue a "not checked-in" warning in case event registration
+    settings.dvr.event_registration_checkin_warning = True
 
     # -------------------------------------------------------------------------
     def customise_dvr_home():
@@ -1054,8 +1058,9 @@ def config(settings):
                     s3db.add_components("pr_person",
                                         pr_person_tag = {"name": "eo_number",
                                                          "joinby": "person_id",
-                                                         "filterby": "tag",
-                                                         "filterfor": ("EONUMBER",),
+                                                         "filterby": {
+                                                             "tag": "EONUMBER",
+                                                             },
                                                          "multiple": False,
                                                          },
                                         )
@@ -1380,7 +1385,9 @@ def config(settings):
                                                         "link": "pr_group_membership",
                                                         "joinby": "person_id",
                                                         "key": "group_id",
-                                                        "filterby": {"group_type": 7},
+                                                        "filterby": {
+                                                            "group_type": 7,
+                                                            },
                                                         },
                                             )
 
@@ -1769,8 +1776,9 @@ def config(settings):
                     s3db.add_components("pr_person",
                                         pr_person_tag = {"name": "eo_number",
                                                          "joinby": "person_id",
-                                                         "filterby": "tag",
-                                                         "filterfor": ("EONUMBER",),
+                                                         "filterby": {
+                                                             "tag": "EONUMBER",
+                                                             },
                                                          "multiple": False,
                                                          },
                                         )
@@ -1835,8 +1843,9 @@ def config(settings):
                     s3db.add_components("pr_person",
                                         pr_person_tag = {"name": "eo_number",
                                                          "joinby": "person_id",
-                                                         "filterby": "tag",
-                                                         "filterfor": ("EONUMBER",),
+                                                         "filterby": {
+                                                             "tag": "EONUMBER",
+                                                             },
                                                          "multiple": False,
                                                          },
                                         )
@@ -2026,8 +2035,8 @@ def config(settings):
     # -------------------------------------------------------------------------
     def case_event_create_onaccept(form):
         """
-            Custom onaccept-method for case events to set the quantity in
-            "FOOD" events to the current household size
+            Custom onaccept-method for case events
+                - cascade FOOD events to other members of the same case group
 
             @param form: the Form
         """
@@ -2041,36 +2050,118 @@ def config(settings):
         if not record_id:
             return
 
-        # Get the person ID and event type code
+        # Prevent recursion
+        try:
+            if formvars._cascade:
+                return
+        except AttributeError:
+            pass
+
         db = current.db
         s3db = current.s3db
+
+        # Get the person ID and event type code and interval
         ttable = s3db.dvr_case_event_type
         etable = s3db.dvr_case_event
-
         query = (etable.id == record_id) & \
                 (ttable.id == etable.type_id)
         row = db(query).select(etable.person_id,
+                               etable.type_id,
+                               etable.date,
                                ttable.code,
+                               ttable.min_interval,
                                limitby = (0, 1),
                                ).first()
         if not row:
             return
-        event_code = row[ttable.code]
-        person_id = row[etable.person_id]
 
-        # Check event type code and update quantity as required
+        # Extract the event attributes
+        event = row.dvr_case_event
+        person_id = event.person_id
+        event_type_id = event.type_id
+        event_date = event.date
+
+        # Extract the event type attributes
+        event_type = row.dvr_case_event_type
+        event_code = event_type.code
+        interval = event_type.min_interval
+
         if event_code == "FOOD":
 
-            # Get current household size
-            adults, children = s3db.dvr_get_household_size(person_id,
-                                                           formatted=False,
-                                                           )
-            household_size = adults + children
+            gtable = s3db.pr_group
+            mtable = s3db.pr_group_membership
+            ctable = s3db.dvr_case
+            stable = s3db.dvr_case_status
 
-            # Update quantity
-            if household_size > 1:
-                query = (etable.id == record_id)
-                db(query).update(quantity=float(household_size))
+            # Get all case groups this person belongs to
+            query = ((mtable.person_id == person_id) & \
+                    (mtable.deleted != True) & \
+                    (gtable.id == mtable.group_id) & \
+                    (gtable.group_type == 7))
+            rows = db(query).select(gtable.id)
+            group_ids = set(row.id for row in rows)
+
+            # Find all other members of these case groups, and
+            # the last FOOD event registration date/time for each
+            members = {}
+            if group_ids:
+                left = [ctable.on(ctable.person_id == mtable.person_id),
+                        stable.on(stable.id == ctable.status_id),
+                        etable.on((etable.person_id == mtable.person_id) & \
+                                  (etable.type_id == event_type_id) & \
+                                  (etable.deleted != True)),
+                        ]
+                query = (mtable.person_id != person_id) & \
+                        (mtable.group_id.belongs(group_ids)) & \
+                        (mtable.deleted != True) & \
+                        (ctable.archived != True) & \
+                        (ctable.deleted != True) & \
+                        (stable.is_closed != True)
+                latest = etable.date.max()
+                case_id = ctable._id.min()
+                rows = db(query).select(mtable.person_id,
+                                        case_id,
+                                        latest,
+                                        left = left,
+                                        groupby = mtable.person_id,
+                                        )
+                for row in rows:
+                    person = row[mtable.person_id]
+                    if person not in members:
+                        members[person] = (row[case_id], row[latest])
+
+            # For each case group member, replicate the event
+            now = current.request.utcnow
+            for member, details in members.items():
+
+                case_id, latest = details
+
+                # Check minimum waiting interval
+                passed = True
+                if interval and latest:
+                    earliest = latest + datetime.timedelta(hours=interval)
+                    if earliest > now:
+                        passed = False
+                if not passed:
+                    continue
+
+                # Replicate the event for this member
+                data = {"person_id": member,
+                        "case_id": case_id,
+                        "type_id": event_type_id,
+                        "date": event_date,
+                        }
+                event_id = etable.insert(**data)
+                if event_id:
+                    # Set record owner
+                    auth = current.auth
+                    auth.s3_set_record_owner(etable, event_id)
+                    auth.s3_make_session_owner(etable, event_id)
+                    # Execute onaccept
+                    # => set _cascade flag to prevent recursion
+                    data["id"] = event_id
+                    data["_cascade"] = True
+                    s3db.onaccept(etable, data, method="create")
 
     # -------------------------------------------------------------------------
     def customise_dvr_case_event_resource(r, tablename):
@@ -2090,7 +2181,8 @@ def config(settings):
         custom_onaccept = case_event_create_onaccept
         if callback:
             if isinstance(callback, (tuple, list)):
-                callback = list(callback) + [custom_onaccept]
+                if custom_onaccept not in callback:
+                    callback = list(callback) + [custom_onaccept]
             else:
                 callback = [callback, custom_onaccept]
         else:
@@ -2144,23 +2236,44 @@ def config(settings):
         """
 
         if hasattr(row, "dvr_case_event"):
-            row = row.dvr_case_event
+            event = row.dvr_case_event
+        else:
+            event = row
+        if hasattr(row, "dvr_case_event_type"):
+            event_type = row.dvr_case_event_type
+        else:
+            event_type = None
+
         try:
-            date = row.date
+            date = event.date
         except AttributeError:
             date = None
-        if date:
-            from dateutil import tz
-            date = date.replace(tzinfo=tz.gettz("UTC"))
-            date = date.astimezone(tz.gettz("Europe/Berlin"))
-            hour = date.time().hour
 
-            if 7 <= hour < 11:
-                tod = "07:00 - 11:00"
-            elif 11 <= hour < 15:
-                tod = "11:00 - 15:00"
+        person_id = 0
+        event_code = None
+        if event_type:
+            try:
+                person_id = event.person_id
+                event_code = event_type.code
+            except AttributeError:
+                pass
+
+        if date:
+            if event_code == "FOOD" and person_id is None:
+                from s3 import s3_str
+                tod = s3_str(current.T("Surplus Meals"))
             else:
-                tod = "15:00 - 07:00"
+                from dateutil import tz
+                date = date.replace(tzinfo=tz.gettz("UTC"))
+                date = date.astimezone(tz.gettz("Europe/Berlin"))
+                hour = date.time().hour
+
+                if 7 <= hour < 11:
+                    tod = "07:00 - 11:00"
+                elif 11 <= hour < 15:
+                    tod = "11:00 - 15:00"
+                else:
+                    tod = "15:00 - 07:00"
         else:
             tod = "-"
         return tod
@@ -2252,7 +2365,10 @@ def config(settings):
                                  },
                     }
                 resource.configure(report_options = report_options,
-                                   extra_fields = ["date"],
+                                   extra_fields = ["date",
+                                                   "person_id",
+                                                   "type_id$code",
+                                                   ],
                                    )
             return result
         s3.prep = custom_prep
@@ -2733,6 +2849,7 @@ def drk_dvr_rheader(r, tabs=[]):
                             (T("Allowance"), "allowance"),
                             (T("Presence"), "shelter_registration_history"),
                             (T("Events"), "case_event"),
+                            (T("Photos"), "image"),
                             (T("Notes"), "case_note"),
                             ]
 
@@ -2779,6 +2896,30 @@ def drk_dvr_rheader(r, tabs=[]):
 
                 if archived:
                     rheader_fields.insert(0, [(None, hint)])
+
+                # Generate rheader XML
+                rheader = S3ResourceHeader(rheader_fields, tabs)(
+                                r,
+                                table = resource.table,
+                                record = record,
+                                )
+
+                # Add profile picture
+                from gluon import A, URL
+                from s3 import s3_avatar_represent
+                record_id = record.id
+                rheader.insert(0, A(s3_avatar_represent(record_id,
+                                                        "pr_person",
+                                                        _class = "rheader-avatar",
+                                                        ),
+                                    _href=URL(f = "person",
+                                              args = [record_id, "image"],
+                                              vars = r.get_vars,
+                                              ),
+                                    )
+                               )
+
+                return rheader
 
         elif tablename == "dvr_case":
 

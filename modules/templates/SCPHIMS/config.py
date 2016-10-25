@@ -19,19 +19,14 @@ def config(settings):
 
     # PrePopulate data
     #settings.base.prepopulate = ("skeleton", "default/users")
-    settings.base.prepopulate += ("SCPHIMS", "default/users")
+    settings.base.prepopulate += ("SCPHIMS", "SCPHIMS/Demo", "default/users")
 
     # Theme (folder to use for views/layout.html)
     settings.base.theme = "SCPHIMS"
 
     # Authentication settings
-    # Should users be allowed to register themselves?
-    #settings.security.self_registration = False
-    # Do new users need to verify their email address?
-    #settings.auth.registration_requires_verification = True
-    # Do new users need to be approved by an administrator prior to being able to login?
-    #settings.auth.registration_requires_approval = True
-    #settings.auth.registration_requests_organisation = True
+    # Users use their existing SC accounts
+    settings.security.self_registration = False
 
     # Approval emails get sent to all admins
     settings.mail.approver = "ADMIN"
@@ -47,6 +42,7 @@ def config(settings):
     # Uncomment to show the Print control:
     # http://eden.sahanafoundation.org/wiki/UserGuidelines/Admin/MapPrinting
     #settings.gis.print_button = True
+    settings.gis.lookup_code = "PSGC"
 
     # L10n settings
     # Languages used in the deployment (used for Language Toolbar & GIS Locations)
@@ -70,7 +66,7 @@ def config(settings):
     #    ("pt-br", "Português (Brasil)"),
     #    ("ru", "русский"),
     #    ("tet", "Tetum"),
-        ("tl", "Tagalog"),
+    #    ("tl", "Tagalog"),
     #    ("tr", "Türkçe"),
     #    ("ur", "اردو"),
     #    ("vi", "Tiếng Việt"),
@@ -101,7 +97,7 @@ def config(settings):
         "PHP" : "Philippine Pesos",
         "USD" : "United States Dollars",
     }
-    #settings.fin.currency_default = "USD"
+    settings.fin.currency_default = "PHP"
 
     # Security Policy
     # http://eden.sahanafoundation.org/wiki/S3AAA#System-widePolicy
@@ -115,6 +111,91 @@ def config(settings):
     # 8: Apply Controller, Function, Table ACLs, Entity Realm + Hierarchy and Delegations
 
     settings.security.policy = 5 # Controller, Function & Table ACLs
+
+    # =========================================================================
+    # Login
+    #
+
+    settings.auth.password_changes = False
+    settings.auth.office365_domains = ["savethechildren.org"]
+
+    #settings.mail.sender = "'IMS' <ims.ph@savethechildren.org>"
+    #settings.mail.server = "smtp.office365.com:587"
+    #settings.mail.tls = True
+    #settings.mail.login = "username:password"
+
+    # =========================================================================
+    # Data Collection
+    #
+
+    def customise_dc_target_resource(r, tablename):
+
+        s3db = current.s3db
+        table = s3db.dc_target
+
+        # Always at L3
+        from s3 import S3LocationSelector
+        table.location_id.widget = S3LocationSelector(levels=("L1", "L2", "L3"))
+
+        has_role = current.auth.s3_has_role
+        if has_role("ERT_LEADER") or has_role("HUM_MANAGER"):
+            # Default to the Rapid Assessment Form
+            s3db = current.s3db
+            ttable = s3db.dc_template
+            RAPID = current.db(ttable.name == "Rapid Assessment").select(ttable.id,
+                                                                         cache = s3db.cache,
+                                                                         limitby = (0, 1)
+                                                                         ).first()
+            try:
+                table.template_id.default = RAPID.id
+            except:
+                # Prepop not done
+                current.log.warning("Cannot default Targets to Rapid Assessment form")
+
+    settings.customise_dc_target_resource = customise_dc_target_resource
+
+    def customise_dc_collection_resource(r, tablename):
+
+        # @ToDo: Filters inc 'Assigned to me'
+
+        db = current.db
+        s3db = current.s3db
+        table = s3db.dc_collection
+
+        # Always at L4
+        from s3 import S3LocationSelector
+        table.location_id.widget = S3LocationSelector(levels=("L1", "L2", "L3", "L4"))
+
+        # Always SC
+        otable = s3db.org_organisation
+        org = db(otable.name == SAVE).select(otable.id,
+                                             cache = s3db.cache,
+                                             limitby = (0, 1)
+                                             ).first()
+        try:
+            SCI = org.id
+        except:
+            current.log.error("Cannot find org %s - prepop not done?" % SAVE)
+        else:
+            f = table.organisation_id
+            f.default = SCI
+            f.readable = f.writable = False 
+
+        has_role = current.auth.s3_has_role
+        if has_role("ERT_LEADER") or has_role("HUM_MANAGER"):
+            # Default to the Rapid Assessment Form
+            ttable = s3db.dc_template
+            RAPID = db(ttable.name == "Rapid Assessment").select(ttable.id,
+                                                                 cache = s3db.cache,
+                                                                 limitby = (0, 1)
+                                                                 ).first()
+            try:
+                table.template_id.default = RAPID.id
+            except:
+                # Prepop not done
+                current.log.warning("Cannot default Targets to Rapid Assessment form")
+
+    settings.customise_dc_collection_resource = customise_dc_collection_resource
 
     # =========================================================================
     # Documents
@@ -172,10 +253,13 @@ def config(settings):
                        "location_id$L3",
                        "location_id$L4",
                        ]
-        if r.controller != "event":
-            list_field.append((T("Disaster"), "event.name"))
-        list_fields += ["organisation_id",
-                        "date",
+        if r.controller == "doc":
+            list_fields += ((T("Disaster"), "event.name"),
+                           "organisation_id",
+                            )
+        elif r.controller == "event":
+            list_fields.append("organisation_id")
+        list_fields += ["date",
                         "name",
                         ]
 
@@ -203,7 +287,7 @@ def config(settings):
                                     "name",
                                     "url",
                                     "date",
-                                    # @ToDo: Have this as an event_id dropdown
+                                    # @ToDo: Have this as an event_id dropdown...defaulting to currently-open Event
                                     #S3SQLInlineComponent("event"),
                                     "organisation_id",
                                     "location_id",
@@ -237,7 +321,7 @@ def config(settings):
                        "location_id$L4",
                        ]
         if r.controller != "event":
-            list_field.append((T("Disaster"), "event.name"))
+            list_fields.append((T("Disaster"), "event.name"))
         list_fields += ["organisation_id",
                         "date",
                         "name",
@@ -252,17 +336,114 @@ def config(settings):
     settings.customise_doc_image_resource = customise_doc_image_resource
 
     def customise_doc_sitrep_resource(r, tablename):
+        """
+            All SitReps are SAVE
+            All SitReps are National in scope
+        """
 
-        if not current.auth.s3_has_role("AUTHENTICATED"):
-            # @ToDo: Just show the External (Public) parts
-            pass
+        #if not current.auth.s3_has_role("AUTHENTICATED"):
+        #    # @ToDo: Just show the External (Public) parts
+        #    pass
 
-    #settings.customise_doc_sitrep_resource = customise_doc_sitrep_resource
+        from s3 import S3DateFilter, S3OptionsFilter, S3SQLCustomForm, S3SQLInlineComponent
+
+        db = current.db
+        s3db = current.s3db
+        table = s3db.doc_sitrep
+
+        # Always SC
+        otable = s3db.org_organisation
+        org = db(otable.name == SAVE).select(otable.id,
+                                             cache = s3db.cache,
+                                             limitby = (0, 1)
+                                             ).first()
+        try:
+            SCI = org.id
+        except:
+            current.log.error("Cannot find org %s - prepop not done?" % SAVE)
+        else:
+            f = table.organisation_id
+            f.default = SCI
+
+        # Always National
+        PH = "Philippines"
+        gtable = s3db.gis_location
+        loc = db((gtable.name == PH) & (gtable.level == "L0")).select(gtable.id,
+                                                                      cache = s3db.cache,
+                                                                      limitby = (0, 1)
+                                                                      ).first()
+        try:
+            PH = loc.id
+        except:
+            current.log.error("Cannot find loc %s - prepop not done?" % PH)
+        else:
+            f = table.location_id
+            f.default = PH
+
+        # Default to currently-open Event (if just 1)
+        s3db.event_sitrep.event_id.default = current.session.s3.event
+
+        crud_form = S3SQLCustomForm(S3SQLInlineComponent("event_sitrep",
+                                                         label = T("Disaster"),
+                                                         fields = [("", "event_id")],
+                                                         multiple = False,
+                                                         required = True,
+                                                         ),
+                                    "date",
+                                    "name",
+                                    "description",
+                                    "comments",
+                                    )
+
+        filter_widgets = [S3OptionsFilter("event_sitrep.event_id"),
+                          S3DateFilter("date"),
+                          ]
+
+        list_fields = ["event_sitrep.event_id",
+                       "date",
+                       "name",
+                       "comments",
+                       ]
+
+        s3db.configure("doc_sitrep",
+                       crud_form = crud_form,
+                       filter_widgets = filter_widgets,
+                       list_fields = list_fields,
+                       )
+
+    settings.customise_doc_sitrep_resource = customise_doc_sitrep_resource
+
+    def customise_doc_sitrep_controller(**attr):
+
+        # Default Filter: Only open Events
+        etable = current.s3db.event_event
+        query = (etable.closed == False) & \
+                (etable.deleted == False)
+        open = current.db(query).select(etable.id,
+                                        etable.name,
+                                        )
+        len_open = len(open)
+        if len_open:
+            if len_open == 1:
+                current.session.s3.event = open.first().id
+            else:
+                current.session.s3.event = None
+            open = {row.id: row.name for row in open}
+
+            from s3 import s3_set_default_filter
+            s3_set_default_filter("event_sitrep.event_id",
+                                  open,
+                                  tablename = "doc_sitrep")
+
+        return attr
+
+    settings.customise_doc_sitrep_controller = customise_doc_sitrep_controller
 
     # =========================================================================
     # Beneficiaries
     #
     settings.dvr.label = "Beneficiary"
+    settings.hrm.email_required = False
 
     def customise_beneficiary_form():
         
@@ -289,6 +470,7 @@ def config(settings):
                         "last_name",
                         "date_of_birth",
                         "gender",
+                        "person_details.disabled",
                         S3SQLInlineComponent(
                                 "contact",
                                 fields = [("", "value"),
@@ -363,6 +545,26 @@ def config(settings):
     #
     settings.event.label = "Disaster"
 
+    def customise_event_event_controller(**attr):
+
+        # Default Filter: Only open Events
+        from s3 import s3_set_default_filter
+        s3_set_default_filter("~.closed",
+                              False,
+                              tablename = "event_event")
+
+        return attr
+
+    settings.customise_event_event_controller = customise_event_event_controller
+
+    def customise_event_event_resource(r, tablename):
+
+        from s3 import S3LocationSelector
+        current.s3db.event_event_location.location_id.widget = \
+                                    S3LocationSelector(levels=("L1", "L2"))
+
+    settings.customise_event_event_resource = customise_event_event_resource
+
     # =========================================================================
     # Projects
     #
@@ -370,8 +572,13 @@ def config(settings):
     settings.project.mode_drr = True
 
     settings.project.activities = True
+    settings.project.activity_sectors = True
+    settings.project.codes = True
     settings.project.hazards = False
     settings.project.hfa = False
+    settings.project.programmes = True
+    settings.project.programme_budget = True
+    settings.project.sectors = False
     settings.project.themes = False
 
     settings.project.multiple_organisations = True
@@ -381,6 +588,235 @@ def config(settings):
                                            2: T("Partner Organization"),
                                            3: T("Donor"),
                                            }
+
+    def customise_project_activity_resource(r, tablename):
+
+        current.s3db.gis_location.addr_street.label = T("Precise Location")
+
+    settings.customise_project_activity_resource = customise_project_activity_resource
+
+    def customise_project_programme_resource(r, tablename):
+
+        from s3 import S3SQLCustomForm, S3SQLInlineComponent
+
+        crud_form = S3SQLCustomForm("name",
+                                    (T("Project Code"), "code"),
+                                    (T("Master Budget"), "budget"),
+                                    "currency",
+                                    # @ToDo: Link Programmes to Locations
+                                    #S3SQLInlineComponent("location",
+                                    #                     label = T("Locations"),
+                                    #                     fields = ["location_id"],
+                                    #                     ),
+                                    # @ToDo: Set Metadata on File: Org, Location, Disaster, Date
+                                    S3SQLInlineComponent("document",
+                                                         label = T("Response Plan"),
+                                                         fields = ["file"],
+                                                         multiple = False,
+                                                         ),
+                                    "comments",
+                                    )
+        
+        current.s3db.configure(tablename,
+                               crud_form = crud_form,
+                               )
+
+    settings.customise_project_programme_resource = customise_project_programme_resource
+
+    def customise_project_project_resource(r, tablename):
+
+        from s3 import S3LocationSelector, S3Represent, S3TextFilter, S3OptionsFilter, S3LocationFilter
+
+        s3db = current.s3db
+        table = s3db.project_project
+
+        table.code.label = "SOF"
+
+        s3db.project_location.location_id.widget = S3LocationSelector(levels = ("L1", "L2", "L3"),
+                                                                      show_map = False,
+                                                                      )
+
+        # Always SC
+        otable = s3db.org_organisation
+        org = current.db(otable.name == SAVE).select(otable.id,
+                                                     cache = s3db.cache,
+                                                     limitby = (0, 1)
+                                                     ).first()
+        try:
+            SCI = org.id
+        except:
+            current.log.error("Cannot find org %s - prepop not done?" % SAVE)
+        else:
+            f = table.organisation_id
+            f.default = SCI
+
+        org_represent = s3db.org_OrganisationRepresent(acronym=False, show_link=True)
+        s3db.project_organisation.organisation_id.represent = org_represent
+        try:
+            s3db.project_donor_organisation.organisation_id.represent = org_represent
+        except:
+            # Table not present on Activities tab
+            pass
+
+        from s3 import S3SQLCustomForm, S3SQLInlineComponent, S3SQLInlineLink
+
+        # @ToDo: Inherit Locations from Disaster?
+
+        crud_form = S3SQLCustomForm(S3SQLInlineLink("programme",
+                                                    label = T("Program"),
+                                                    field = "programme_id",
+                                                    multiple = False,
+                                                    ),
+                                    "name",
+                                    "code",
+                                    "status_id",
+                                    "start_date",
+                                    "end_date",
+                                    "budget",
+                                    "currency",
+                                    S3SQLInlineComponent("location",
+                                                         label = T("Locations"),
+                                                         fields = ["location_id"],
+                                                         ),
+                                    S3SQLInlineComponent("organisation",
+                                                         name = "donor",
+                                                         label = T("Donor(s)"),
+                                                         fields = ["organisation_id"],
+                                                         ),
+                                    # @ToDo: Set Metadata on File: Org, Location, Disaster, Date
+                                    S3SQLInlineComponent("document",
+                                                         name = "concept_note",
+                                                         label = T("Concept Note"),
+                                                         fields = ["file"],
+                                                         multiple = False,
+                                                         ),
+                                    # @ToDo: Be able to retrieve the correct document 
+                                    #S3SQLInlineComponent("document",
+                                    #                     name = "log_frame",
+                                    #                     label = T("Log Frame"),
+                                    #                     fields = ["file"],
+                                    #                     multiple = False,
+                                    #                     ),
+                                    "comments",
+                                    )
+
+        filter_widgets = [
+            S3TextFilter(["name",
+                          "code",
+                          #"description",
+                          ],
+                         label = T("Search"),
+                         comment = T("Search for a Project by name or code"),
+                         ),
+            S3OptionsFilter("status_id",
+                            label = T("Status"),
+                            cols = 3,
+                            ),
+            S3OptionsFilter("donor.organisation_id",
+                            label = T("Donor"),
+                            hidden = True,
+                            ),
+            S3LocationFilter("location.location_id",
+                             levels = ("L1", "L2", "L3"),
+                             hidden = True,
+                             ),
+            S3OptionsFilter("programme_project.programme_id",
+                            label = T("Program"),
+                            hidden = True,
+                            ),
+            #S3OptionsFilter("sector_project.sector_id",
+            #                label = T("Sector"),
+            #                location_filter = True,
+            #                none = True,
+            #                hidden = True,
+            #                ),
+            ]
+
+        list_fields = ["status_id",
+                       "code",
+                       "name",
+                       (T("Donors"), "donor.organisation_id"),
+                       (T("Locations"), "location.location_id"),
+                       "start_date",
+                       "end_date",
+                       "budget",
+                       "currency",
+                       (T("Program"), "programme.name"),
+                       ]
+
+        s3db.configure("project_project",
+                       crud_form = crud_form,
+                       filter_widgets = filter_widgets,
+                       list_fields = list_fields,
+                       )
+
+    settings.customise_project_project_resource = customise_project_project_resource
+
+    def project_rheader(r, ert=False):
+
+        if ert:
+            # Simple header, no Tabs
+            from s3 import S3ResourceHeader
+            rheader_fields = [["name"],
+                              ["code"],
+                              [(T("Donors"), "donor.organisation_id")],
+                              [(T("Locations"), "location.location_id")],
+                              ["start_date"],
+                              ["end_date"],
+                              ]
+            rheader = S3ResourceHeader(rheader_fields, tabs=[])(r)
+            return rheader
+        else:
+            # @ToDo: Remove Implementing Org, Add Donors
+            return current.s3db.project_rheader(r)
+
+    def customise_project_project_controller(**attr):
+
+        # Default Filter: Only open Projects
+        # @ToDo: Fix (not activating for some reason)
+        stable = current.s3db.project_status
+        active = current.db(stable.name.belongs("Active", "Proposed")).select(stable.id,
+                                                                              stable.name,
+                                                                              )
+        active = {row.id: row.name for row in active}
+
+        from s3 import s3_set_default_filter
+        s3_set_default_filter("~.status_id",
+                              active,
+                              tablename = "project_project")
+
+        has_role = current.auth.s3_has_role
+        ERT_LEADER = has_role("ERT_LEADER") and not has_role("ADMIN")
+
+        s3 = current.response.s3
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+            # Call standard postp
+            if callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if ERT_LEADER:
+                # Don't open Projects: Open Activities
+                from gluon import URL
+                from s3 import s3_str
+                s3.actions = [dict(label=s3_str(T("Open")),
+                                   _class="action-btn",
+                                   url=URL(args=["[id]", "activity"])),
+                              ]
+
+            return output
+        s3.postp = custom_postp
+
+        if ERT_LEADER:
+            # Simplified RHeader for Operational Requirements
+            attr["rheader"] = lambda r: project_rheader(r, ert=True)
+        else:
+            # Tweaked RHeader
+            attr["rheader"] = lambda r: project_rheader(r, ert=False)
+
+        return attr
+
+    settings.customise_project_project_controller = customise_project_project_controller
 
     # -------------------------------------------------------------------------
     # Comment/uncomment modules here to disable/enable them
@@ -484,12 +920,12 @@ def config(settings):
             restricted = True,
             module_type = 10,
         )),
-        #("inv", Storage(
-        #    name_nice = T("Warehouses"),
-        #    #description = "Receiving and Sending Items",
-        #    restricted = True,
-        #    module_type = 4
-        #)),
+        ("inv", Storage(
+            name_nice = T("Warehouses"),
+            #description = "Receiving and Sending Items",
+            restricted = True,
+            module_type = 4
+        )),
         #("asset", Storage(
         #    name_nice = T("Assets"),
         #    #description = "Recording and Assigning Assets",
@@ -521,12 +957,12 @@ def config(settings):
         #    restricted = True,
         #    module_type = 10
         #)),
-        #("hms", Storage(
-        #    name_nice = T("Hospitals"),
-        #    #description = "Helps to monitor status of hospitals",
-        #    restricted = True,
-        #    module_type = 10
-        #)),
+        ("hms", Storage(
+            name_nice = T("Clinics"),
+            #description = "Helps to monitor status of hospitals",
+            restricted = True,
+            module_type = 10
+        )),
         ("dc", Storage(
             name_nice = T("Assessments"),
             restricted = True,
@@ -543,6 +979,12 @@ def config(settings):
             #description = "Activate Events (e.g. from Scenario templates) for allocation of appropriate Resources (Human, Assets & Facilities).",
             restricted = True,
             module_type = 10,
+        )),
+        ("edu", Storage(
+            name_nice = T("Schools"),
+            #description = "Helps to monitor status of schools",
+            restricted = True,
+            module_type = 10
         )),
         #("transport", Storage(
         #   name_nice = T("Transport"),

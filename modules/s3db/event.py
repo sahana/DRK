@@ -37,6 +37,7 @@ __all__ = ("S3EventModel",
            "S3EventAlertModel",
            "S3EventAssetModel",
            "S3EventCMSModel",
+           "S3EventDCModel",
            "S3EventHRModel",
            "S3EventTeamModel",
            "S3EventImpactModel",
@@ -97,6 +98,7 @@ class S3EventModel(S3Model):
         AUTOCOMPLETE_HELP = messages.AUTOCOMPLETE_HELP
 
         disaster = settings.get_event_label() # If we add more options in future then == "Disaster"
+        exercise = settings.get_event_exercise()
         hierarchical_event_types = settings.get_event_types_hierarchical()
 
         # ---------------------------------------------------------------------
@@ -224,6 +226,8 @@ class S3EventModel(S3Model):
                            default = False,
                            label = T("Exercise?"),
                            represent = lambda opt: "√" if opt else NONE,
+                           readable = exercise,
+                           writable = exercise,
                            #comment = DIV(_class="tooltip",
                            #              _title="%s|%s" % (T("Exercise"),
                                                            # Should!
@@ -304,34 +308,42 @@ class S3EventModel(S3Model):
         # Which levels of Hierarchy are we using?
         levels = current.gis.get_relevant_hierarchy_levels()
 
+        filter_widgets = [S3LocationFilter("event_location.location_id",
+                                           levels = levels,
+                                           label = T("Location"),
+                                           ),
+                          # @ToDo: Filter for events which are open within a date range
+                          #S3DateFilter("start_date",
+                          #             label = None,
+                          #             hide_time = True,
+                          #             input_labels = {"ge": "From", "le": "To"}
+                          #             ),
+                          # Typically we just need to filter by Year
+                          S3OptionsFilter("year",
+                                          label = T("Year"),
+                                          ),
+                          S3OptionsFilter("closed",
+                                          label = T("Status"),
+                                          options = OrderedDict([(False, T("Open")),
+                                                                 (True, T("Closed")),
+                                                                 ]),
+                                          cols = 2,
+                                          sort = False,
+                                          ),
+                          ]
+
         if hierarchical_event_types:
-            filter_widgets = [S3HierarchyFilter("event_type_id",
-                                                label = T("Type"),
-                                                #multiple = False,
-                                                ),
-                              ]
+            filter_widgets.insert(0, S3HierarchyFilter("event_type_id",
+                                                       label = T("Type"),
+                                                       ))
         else:
-            filter_widgets = [S3OptionsFilter("event_type_id",
-                                              label = T("Type"),
-                                              multiple = False,
-                                              #options = lambda: \
-                                              #  s3_get_filter_opts("event_event_type",
-                                              #                     translate = True)
-                                              ),
-                              ]
-
-        filter_widgets.extend((S3LocationFilter("event_location.location_id",
-                                                levels = levels,
-                                                label = T("Location"),
-                                                ),
-                               # @ToDo: Filter for any event which starts or ends within a date range
-                               S3DateFilter("start_date",
-                                            label = None,
-                                            hide_time = True,
-                                            input_labels = {"ge": "From", "le": "To"}
-                                            ),
-                               ))
-
+            filter_widgets.insert(0, S3OptionsFilter("event_type_id",
+                                                     label = T("Type"),
+                                                     #multiple = False,
+                                                     #options = lambda: \
+                                                     #  s3_get_filter_opts("event_event_type",
+                                                     #                     translate = True)
+                                                     ))
         report_fields = ["event_type_id",
                          ]
         rappend = report_fields.append
@@ -353,9 +365,46 @@ class S3EventModel(S3Model):
                 ),
             )
 
+        # Custom Form
+        crud_fields = ["name",
+                       "event_type_id",
+                       "start_date",
+                       "closed",
+                       "end_date",
+                       S3SQLInlineComponent("event_location",
+                                            label = T("Locations"),
+                                            #multiple = False,
+                                            fields = [("", "location_id")],
+                                            ),
+                       "comments",
+                       ]
+
+        list_fields = ["name",
+                       (T("Type"), "event_type_id$name"),
+                       (T("Location"), "location.name"),
+                       "start_date",
+                       "closed",
+                       "comments",
+                       ]
+
+        if exercise:
+            crud_fields.insert(1, "exercise")
+            list_fields.insert(4, "exercise")
+            filter_widgets.insert(2, S3OptionsFilter("exercise",
+                                                     label = T("Exercise"),
+                                                     options = OrderedDict([(True, T("Yes")),
+                                                                            (False, T("No")),
+                                                                            ]),
+                                                     cols = 2,
+                                                     sort = False,
+                                                     ))
+
+        crud_form = S3SQLCustomForm(*crud_fields)
+
         configure(tablename,
                   context = {"location": "event_location.location_id",
                              },
+                  crud_form = crud_form,
                   deduplicate = S3Duplicate(primary = ("name",
                                                        "start_date",
                                                        ),
@@ -364,15 +413,7 @@ class S3EventModel(S3Model):
                                             ),
                   extra_fields = ["start_date"],
                   filter_widgets = filter_widgets,
-                  list_fields = ["id",
-                                 "name",
-                                 "event_type_id$name",
-                                 (T("Location"), "location.name"),
-                                 "start_date",
-                                 "exercise",
-                                 "closed",
-                                 "comments",
-                                 ],
+                  list_fields = list_fields,
                   list_orderby = "event_event.start_date desc",
                   orderby = "event_event.start_date desc",
                   report_options = report_options,
@@ -383,6 +424,21 @@ class S3EventModel(S3Model):
         # Components
         self.add_components(tablename,
                             event_incident = "event_id",
+                            dc_collection = {"link": "event_collection",
+                                             "joinby": "event_id",
+                                             "key": "collection_id",
+                                             "actuate": "replace",
+                                             },
+                            dc_target = {"link": "event_target",
+                                         "joinby": "event_id",
+                                         "key": "target_id",
+                                         "actuate": "replace",
+                                         },
+                            doc_sitrep = {"link": "event_sitrep",
+                                          "joinby": "event_id",
+                                          "key": "sitrep_id",
+                                          "actuate": "replace",
+                                          },
                             gis_location = {"link": "event_event_location",
                                             "joinby": "event_id",
                                             "key": "location_id",
@@ -397,7 +453,7 @@ class S3EventModel(S3Model):
                             stats_impact = {"link": "event_event_impact",
                                             "joinby": "event_id",
                                             "key": "impact_id",
-                                            #"actuate": "hide",
+                                            "actuate": "replace",
                                             },
                             event_event_impact = "event_id",
                             )
@@ -413,17 +469,25 @@ class S3EventModel(S3Model):
         define_table(tablename,
                      event_id(),
                      self.gis_location_id(
-                        widget = S3LocationAutocompleteWidget(),
+                        widget = S3LocationSelector(show_map=False),
+                        #widget = S3LocationAutocompleteWidget(),
                         requires = IS_LOCATION(),
                         represent = self.gis_LocationRepresent(sep=", "),
-                        comment = S3PopupLink(c = "gis",
-                                              f = "location",
-                                              label = T("Create Location"),
-                                              title = T("Location"),
-                                              tooltip = AUTOCOMPLETE_HELP,
-                                              ),
+                        #comment = S3PopupLink(c = "gis",
+                        #                      f = "location",
+                        #                      label = T("Create Location"),
+                        #                      title = T("Location"),
+                        #                      tooltip = AUTOCOMPLETE_HELP,
+                        #                      ),
                         ),
                      *s3_meta_fields())
+
+        configure(tablename,
+                  deduplicate = S3Duplicate(primary = ("event_id",
+                                                       "location_id",
+                                                       ),
+                                            ),
+                  )
 
         # ---------------------------------------------------------------------
         # Event Tags
@@ -485,6 +549,8 @@ class S3EventModel(S3Model):
             Requires "start_date" to be in extra_fields
 
             @param row: the Row
+
+            @ToDo: Extend this to show multiple years if open for multiple?
         """
 
         try:
@@ -1610,15 +1676,17 @@ class S3EventCMSModel(S3Model):
 
         #T = current.T
 
+        post_id = self.cms_post_id
+
         # ---------------------------------------------------------------------
         # Link table between Posts & Events/Incidents
         tablename = "event_post"
         self.define_table(tablename,
                           self.event_event_id(ondelete = "CASCADE"),
                           self.event_incident_id(ondelete = "CASCADE"),
-                          self.cms_post_id(empty = False,
-                                           ondelete = "CASCADE",
-                                           ),
+                          post_id(empty = False,
+                                  ondelete = "CASCADE",
+                                  ),
                           *s3_meta_fields())
 
         #current.response.s3.crud_strings[tablename] = Storage(
@@ -1637,12 +1705,54 @@ class S3EventCMSModel(S3Model):
         # Link table between Posts & Incident Types
         tablename = "event_post_incident_type"
         self.define_table(tablename,
-                          self.cms_post_id(empty = False,
-                                           ondelete = "CASCADE",
-                                           ),
+                          post_id(empty = False,
+                                  ondelete = "CASCADE",
+                                  ),
                           self.event_incident_type_id(empty = False,
                                                       ondelete = "CASCADE",
                                                       ),
+                          *s3_meta_fields())
+
+        # Pass names back to global scope (s3.*)
+        return {}
+
+# =============================================================================
+class S3EventDCModel(S3Model):
+    """
+        Link Data Collections to Events &/or Incidents
+    """
+
+    names = ("event_collection",
+             "event_target",
+             )
+
+    def model(self):
+
+        #T = current.T
+
+        event_id = self.event_event_id
+        incident_id = self.event_incident_id
+
+        # ---------------------------------------------------------------------
+        # Link table between Collections & Events/Incidents
+        tablename = "event_collection"
+        self.define_table(tablename,
+                          event_id(ondelete = "CASCADE"),
+                          incident_id(ondelete = "CASCADE"),
+                          self.dc_collection_id(empty = False,
+                                                ondelete = "CASCADE",
+                                                ),
+                          *s3_meta_fields())
+
+        # ---------------------------------------------------------------------
+        # Link table between Targets & Events/Incidents
+        tablename = "event_target"
+        self.define_table(tablename,
+                          event_id(ondelete = "CASCADE"),
+                          incident_id(ondelete = "CASCADE"),
+                          self.dc_target_id(empty = False,
+                                            ondelete = "CASCADE",
+                                            ),
                           *s3_meta_fields())
 
         # Pass names back to global scope (s3.*)
@@ -1900,6 +2010,19 @@ class S3EventImpactModel(S3Model):
                        onaccept = self.event_impact_onaccept,
                        )
 
+        # Not accessed directly
+        #current.response.s3.crud_strings[tablename] = Storage(
+        #    label_create = T("Add Impact"),
+        #    title_display = T("Impact Details"),
+        #    title_list = T("Impacts"),
+        #    title_update = T("Edit Impact"),
+        #    label_list_button = T("List Impacts"),
+        #    label_delete_button = T("Delete Impact"),
+        #    msg_record_created = T("Impact added"),
+        #    msg_record_modified = T("Impact updated"),
+        #    msg_record_deleted = T("Impact removed"),
+        #    msg_list_empty = T("No Impacts currently registered in this Event"))
+
         # Pass names back to global scope (s3.*)
         return {}
 
@@ -1912,8 +2035,8 @@ class S3EventImpactModel(S3Model):
         """
 
         try:
-            formvars = form.vars
-            record_id = formvars.id
+            form_vars = form.vars
+            record_id = form_vars.id
         except KeyError:
             return
         if not record_id:
@@ -1925,7 +2048,7 @@ class S3EventImpactModel(S3Model):
         table = s3db.event_event_impact
 
         # Make sure we have both keys
-        if any(f not in formvars for f in ("event_id", "incident_id")):
+        if any(f not in form_vars for f in ("event_id", "incident_id")):
             query = (table.id == record_id)
             record = db(query).select(table.id,
                                       table.event_id,
@@ -1934,7 +2057,7 @@ class S3EventImpactModel(S3Model):
             if not record:
                 return
         else:
-            record = formvars
+            record = form_vars
 
         # If event_id is empty - populate it from the incident
         if not record.event_id and record.incident_id:
@@ -1943,7 +2066,7 @@ class S3EventImpactModel(S3Model):
             incident = db(query).select(itable.event_id,
                                         limitby=(0, 1)).first()
             if incident:
-                db(table.id == record_id).update(event_id=incident.event_id)
+                db(table.id == record_id).update(event_id = incident.event_id)
 
 # =============================================================================
 class S3EventIReportModel(S3Model):
@@ -2716,11 +2839,17 @@ def event_rheader(r):
                 tabs += [(T("Documents"), "document"),
                          (T("Photos"), "image"),
                          ]
+            if settings.get_event_impact_tab():
+                tabs.append((T("Impact"), "impact"))
+            if settings.get_event_target_tab():
+                tabs.append((T("Targets"), "target"))
+            if settings.get_event_collection_tab():
+                tabs.append((T("Assessments"), "collection"))
             if settings.has_module("cr"):
                 tabs.append((T("Shelters"), "event_shelter"))
             #if settings.has_module("req"):
             #    tabs.append((T("Requests"), "req"))
-            if settings.has_module("msg"):
+            if settings.get_event_dispatch_tab():
                 tabs.append((T("Send Notification"), "dispatch"))
 
             rheader_tabs = s3_rheader_tabs(r, tabs)
@@ -2752,7 +2881,7 @@ def event_rheader(r):
             append = tabs.append
 
             # Impact tab
-            if settings.get_event_incident_impact_tab():
+            if settings.get_incident_impact_tab():
                 append((T("Impact"), "impact"))
 
             # Tasks tab
@@ -2767,7 +2896,7 @@ def event_rheader(r):
                      append((T("Assign %(staff)s") % dict(staff=STAFF), "assign"))
 
             # Teams tab:
-            teams_tab = settings.get_event_incident_teams_tab()
+            teams_tab = settings.get_incident_teams_tab()
             if teams_tab:
                 tab_label = T("Teams") if teams_tab is True else T(teams_tab)
                 append((tab_label, "group"))
@@ -2784,7 +2913,7 @@ def event_rheader(r):
                          ))
 
             # Messaging tab
-            if settings.has_module("msg"):
+            if settings.get_incident_dispatch_tab():
                 append((T("Send Notification"), "dispatch"))
 
             rheader_tabs = s3_rheader_tabs(r, tabs)

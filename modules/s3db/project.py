@@ -602,16 +602,18 @@ class S3ProjectModel(S3Model):
                                                    # Donors
                                                    {"name": "donor",
                                                     "joinby": "project_id",
-                                                    "filterby": "role",
-                                                    # Works for IFRC & DRRPP:
-                                                    "filterfor": (3,),
+                                                    "filterby": {
+                                                        # Works for IFRC & DRRPP:
+                                                        "role": 3,
+                                                        },
                                                     },
                                                    # Partners
                                                    {"name": "partner",
                                                     "joinby": "project_id",
-                                                    "filterby": "role",
-                                                    # Works for IFRC & DRRPP:
-                                                    "filterfor": (2, 9),
+                                                    "filterby": {
+                                                        # Works for IFRC & DRRPP:
+                                                        "role": (2, 9),
+                                                        },
                                                     },
                                                    ),
                           )
@@ -1881,7 +1883,7 @@ class S3ProjectActivitySectorModel(S3Model):
         # ---------------------------------------------------------------------
         # Project Activities <> Sectors Link Table
         #
-        # @ToDo" When Activity is linked to a Project, ensure these stay in sync
+        # @ToDo: When Activity is linked to a Project, ensure these stay in sync
         #
         tablename = "project_sector_activity"
         self.define_table(tablename,
@@ -2008,6 +2010,9 @@ class S3ProjectBeneficiaryModel(S3Model):
         define_table = self.define_table
         super_link = self.super_link
 
+        stats_parameter_represent = S3Represent(lookup="stats_parameter",
+                                                translate=True)
+
         # ---------------------------------------------------------------------
         # Project Beneficiary Type
         #
@@ -2024,6 +2029,16 @@ class S3ProjectBeneficiaryModel(S3Model):
                      s3_comments("description",
                                  label = T("Description"),
                                  ),
+                     # Link to the Beneficiary Type which is the Total, so that we can calculate percentages
+                     Field("total_id", self.stats_parameter,
+                           label = T("Total"),
+                           represent = stats_parameter_represent,
+                           requires = IS_EMPTY_OR(
+                                        IS_ONE_OF(db, "stats_parameter.parameter_id",
+                                                  stats_parameter_represent,
+                                                  instance_types = ("project_beneficiary_type",),
+                                                  sort=True)),
+                           ),
                      *s3_meta_fields())
 
         # CRUD Strings
@@ -2067,9 +2082,7 @@ class S3ProjectBeneficiaryModel(S3Model):
                                 empty = False,
                                 instance_types = ("project_beneficiary_type",),
                                 label = T("Beneficiary Type"),
-                                represent = S3Represent(lookup="stats_parameter",
-                                                        translate=True,
-                                                        ),
+                                represent = stats_parameter_represent,
                                 readable = True,
                                 writable = True,
                                 comment = S3PopupLink(c = "project",
@@ -3600,8 +3613,9 @@ class S3ProjectLocationModel(S3Model):
                                       "key": "pe_id",
                                       "fkey": "pe_id",
                                       "pkey": "person_id",
-                                      "filterby": "contact_method",
-                                      "filterfor": ("EMAIL",),
+                                      "filterby": {
+                                          "contact_method": "EMAIL",
+                                          },
                                       },
                                      # Mobile Phone
                                      {"name": "phone",
@@ -3610,8 +3624,9 @@ class S3ProjectLocationModel(S3Model):
                                       "key": "pe_id",
                                       "fkey": "pe_id",
                                       "pkey": "person_id",
-                                      "filterby": "contact_method",
-                                      "filterfor": ("SMS",),
+                                      "filterby": {
+                                          "contact_method": "SMS",
+                                          },
                                       },
                                      ),
                        )
@@ -4382,19 +4397,19 @@ class S3ProjectPlanningModel(S3Model):
                                        },
                           }
 
-        self.configure(tablename,
-                       list_fields = ["indicator_id",
-                                      "end_date",
-                                      "target_value",
-                                      "value",
-                                      (T("Percentage"), "percentage"),
-                                      "comments",
-                                      ],
-                       onaccept = self.project_indicator_data_onaccept,
-                       ondelete = self.project_indicator_data_ondelete,
-                       orderby = ("project_indicator_data.end_date", "project_indicator_data.indicator_id"),
-                       report_options = report_options,
-                       )
+        configure(tablename,
+                  list_fields = ["indicator_id",
+                                 "end_date",
+                                 "target_value",
+                                 "value",
+                                 (T("Percentage"), "percentage"),
+                                 "comments",
+                                 ],
+                  onaccept = self.project_indicator_data_onaccept,
+                  ondelete = self.project_indicator_data_ondelete,
+                  orderby = ("project_indicator_data.end_date", "project_indicator_data.indicator_id"),
+                  report_options = report_options,
+                  )
 
         # Pass names back to global scope (s3.*)
         return dict(#project_goal_id = goal_id,
@@ -6961,7 +6976,7 @@ def project_indicator_progress_report(r, **attr):
 # =============================================================================
 class S3ProjectProgrammeModel(S3Model):
     """
-        Project Programme Model
+        Programmes Model
     """
 
     names = ("project_programme",
@@ -6975,18 +6990,37 @@ class S3ProjectProgrammeModel(S3Model):
 
         NONE = current.messages["NONE"]
 
+        budgets = current.deployment_settings.get_project_programme_budget()
+
         # ---------------------------------------------------------------------
-        # Project Programmes
+        # Programmes
         #
         tablename = "project_programme"
         self.define_table(tablename,
+                          self.super_link("doc_id", "doc_entity"),
+                          #super_link("budget_entity_id", "budget_entity"),
                           self.org_organisation_id(),
                           Field("name",
                                 label = T("Title"),
                                 represent = lambda v: T(v) if v is not None \
                                                            else NONE,
-                                requires = IS_NOT_EMPTY()
+                                requires = IS_NOT_EMPTY(),
                                 ),
+                          Field("code",
+                                label = T("Code"),
+                                represent = lambda v: T(v) if v is not None \
+                                                           else NONE,
+                                ),
+                          Field("budget", "double",
+                                label = T("Budget"),
+                                represent = lambda v: \
+                                    IS_FLOAT_AMOUNT.represent(v, precision=2),
+                                readable = budgets,
+                                writable = budgets,
+                                ),
+                          s3_currency(readable = budgets,
+                                      writable = budgets,
+                                      ),
                           s3_comments(),
                           *s3_meta_fields())
 
@@ -7026,6 +7060,8 @@ class S3ProjectProgrammeModel(S3Model):
                        deduplicate = S3Duplicate(primary = ("name",),
                                                  secondary = ("organisation_id",),
                                                  ),
+                       super_entity = "doc_entity",
+                       #super_entity = ("doc_entity", "budget_entity"),
                        )
 
         self.add_components(tablename,
@@ -7035,7 +7071,8 @@ class S3ProjectProgrammeModel(S3Model):
                                                "actuate": "link",
                                                "autocomplete": "name",
                                                "autodelete": False,
-                                               })
+                                               },
+                            )
 
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
@@ -9844,7 +9881,7 @@ def project_rheader(r):
                           ]
         if indicators:
             rheader_fields.append(["current_status_by_indicators", "overall_status_by_indicators"])
-        # @ToDo: Either get S3ResourceHeader to support selectors or else rewrite manually
+        # @ToDo: Fix
         #if settings.get_project_budget_monitoring():
         #    rheader_fields.append(["budget.total_budget"])
         rheader = S3ResourceHeader(rheader_fields, tabs)(r)
@@ -10304,7 +10341,7 @@ def project_project_filters(org_label):
         S3TextFilter(["name",
                       "code",
                       "description",
-                     ],
+                      ],
                      label = T("Search"),
                      comment = T("Search for a Project by name, code, or description."),
                      ),
@@ -10321,7 +10358,7 @@ def project_project_filters(org_label):
                          # Default should introspect
                          #levels = ("L0", "L1", "L2"),
                          hidden = True,
-                         )
+                         ),
         ]
 
     append_filter = filter_widgets.append
@@ -10329,7 +10366,7 @@ def project_project_filters(org_label):
     if settings.get_project_programmes():
         append_filter(
             S3OptionsFilter("programme_project.programme_id",
-                            label = T("Programme"),
+                            label = T("Program"),
                             hidden = True,
                             )
         )

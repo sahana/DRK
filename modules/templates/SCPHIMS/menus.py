@@ -77,19 +77,23 @@ class S3MainMenu(default.S3MainMenu):
                     M("Documents", c="doc", f="document"),
                     M("Photos", c="doc", f="image"),
                     M("Items", c="supply", f="distribution_item"),
+                    M("Beneficiaries", c="dvr", f="person"),
                     M("Staff", c="hrm", f="human_resource"),
-                    M("Beneficiaries", c="dvr", f="case"),
+                    M("Clinics", c="hms", f="hospital"),
+                    M("Offices", c="org", f="office"),
+                    M("Schools", c="edu", f="school"),
+                    M("Warehouses", c="inv", f="warehouse"),
                 ),
                 MM("Assessments", c="dc", f="collection", m="summary")(
                     M("Table", m="list"),
                     M("Report", m="report"),
                     M("Map", m="map"),
                 ),
-                MM("Projects", c="project", f="project")(
+                MM("Projects", c="project", f="project", m="summary")(
                     M("Report", m="report"),
                     M("Map", m="map"),
                 ),
-                MM("Activities", c="project", f="activity")(
+                MM("Activities", c="project", f="activity", m="summary")(
                     M("Report", m="report"),
                     M("Map", m="map"),
                 ),
@@ -103,9 +107,13 @@ class S3MainMenu(default.S3MainMenu):
             # Manage Projects
             return [
                 homepage(),
-                MM("Calendar", c="project", f="activity", m="report"),
-                MM("Assessments", c="dc", f="collection"),
-                MM("Projects", c="project", f="project"),
+                MM("Calendar", c="cms", f="post", m="calendar"), # Weekly Schedule
+                MM("Staff", c="hrm", f="human_resource"),
+                MM("Disasters", c="event", f="event"),
+                MM("Assessments", c="dc", f="collection", m="summary")(
+                    M("Targets", f="target"),
+                ),
+                MM("Projects", c="project", f="project", m="summary"),
                 MM("4W", c="project", f="activity", m="summary"),
                 MM("SitReps", c="doc", f="sitrep"),
                 MM("Documents", c="doc", f="document"),
@@ -116,30 +124,31 @@ class S3MainMenu(default.S3MainMenu):
             return [
                 homepage(),
                 M("Distributions", c="project", f="distribution"),
-                M("Beneficiaries", c="dvr", f="case"),
+                M("Beneficiaries", c="dvr", f="person"),
                 homepage("gis"),
             ]
         elif has_role("ERT_LEADER"):
             # Field Operations
             return [
                 homepage(),
-                MM("Assessments", c="dc", f="collection"),
+                MM("Assessments", c="dc", f="target"),
+                MM("Activities", c="project", f="project"), # Activities are accessed via Projects
                 MM("SitReps", c="doc", f="sitrep"),
                 MM("Documents", c="doc", f="document"),
-                MM("Activities", c="project", f="activity"),
                 homepage("gis"),
             ]
         elif has_role("AUTHENTICATED"):
-            # SC Staff inc Senior Managers
+            # SC Staff inc ERT members and Senior Managers
             return [
                 homepage(),
+                MM("Calendar", c="cms", f="post", m="calendar"), # Weekly Schedule
                 MM("Assessments", c="dc", f="collection", m="summary"),
                 MM("SitReps", c="doc", f="sitrep"),
                 MM("4W", c="project", f="activity", m="summary"),
                 homepage("gis"),
             ]
         else:
-            # Anonymous - can just see 4W (& external SitReps?)
+            # Anonymous - can just see 4W & external SitReps
             return [
                 homepage(),
                 homepage("gis"),
@@ -169,7 +178,53 @@ class S3OptionsMenu(default.S3OptionsMenu):
         underscore prefix).
     """
 
-    def dvr(self):
+    # -------------------------------------------------------------------------
+    def cms(self):
+        """ DOC / Documents Module """
+
+        if current.auth.s3_has_role("ADMIN"):
+            return super(S3OptionsMenu, self).cms()
+        else:
+            return None
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def dc():
+        """ Data Collection Tool """
+
+        #ADMIN = current.session.s3.system_roles.ADMIN
+
+        has_role = current.auth.s3_has_role
+        if has_role("HUM_MGR") or has_role("ERT"):
+            return M(c="dc")(
+                        M("Templates", f="template")(
+                            M("Create", m="create"),
+                        ),
+                        #M("Questions", f="question")(
+                        #    M("Create", m="create"),
+                        #),
+                        M("Assessment Planning", f="target")(
+                            M("Create", m="create"),
+                        ),
+                        M("Assessments", f="collection")(
+                            M("Create", m="create"),
+                        ),
+                    )
+        else:
+            return None
+
+    # -------------------------------------------------------------------------
+    def doc(self):
+        """ DOC / Documents Module """
+
+        if current.auth.s3_is_logged_in():
+            return super(S3OptionsMenu, self).doc()
+        else:
+            return None
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def dvr():
         """ Beneficiary Registration """
 
         return M(c="dvr")(
@@ -194,6 +249,15 @@ class S3OptionsMenu(default.S3OptionsMenu):
                 )
 
     # -------------------------------------------------------------------------
+    def gis(self):
+        """ GIS / Maps Module """
+
+        if current.auth.s3_has_role("MAP_ADMIN"):
+            return super(S3OptionsMenu, self).gis()
+        else:
+            return None
+
+    # -------------------------------------------------------------------------
     @staticmethod
     def org():
         """ ORG / Organization Registry """
@@ -202,6 +266,10 @@ class S3OptionsMenu(default.S3OptionsMenu):
 
         return M(c="org")(
                     M("Organizations", f="organisation")(
+                        M("Create", m="create"),
+                        M("Import", m="import")
+                    ),
+                    M("Offices", f="office")(
                         M("Create", m="create"),
                         M("Import", m="import")
                     ),
@@ -223,6 +291,9 @@ class S3OptionsMenu(default.S3OptionsMenu):
 
         if has_role("ADMIN"):
             return M(c="project")(
+                     M("Progams", f="programme")(
+                        M("Create", m="create"),
+                     ),
                      M("Projects", f="project")(
                         M("Create", m="create"),
                      ),
@@ -258,6 +329,9 @@ class S3OptionsMenu(default.S3OptionsMenu):
         elif has_role("HUM_MANAGER"):
             # Manage Projects
             return M(c="project")(
+                     M("Progams", f="programme")(
+                        M("Create", m="create"),
+                     ),
                      M("Projects", f="project")(
                         M("Create", m="create"),
                      ),
@@ -286,17 +360,16 @@ class S3OptionsMenu(default.S3OptionsMenu):
                  )
         elif has_role("ERT_LEADER"):
             # Field Operations
-            return M(c="project")(
-                     M("Activities", f="activity")(
-                        M("Create", m="create"),
-                        M("Map", m="map"),
-                     ),
-                     M("Reports", f="location", m="report")(
-                        M("3W", f="location", m="report"),
-                        M("Beneficiaries", f="beneficiary", m="report"),
-                        M("Funding", f="organisation", m="report"),
-                     ),
-                 )
+            # - just need to see Projects & create Activities within them
+            return None
+            #return M(c="project")(
+            #         M("Projects", f="project"),
+            #         M("Activities", f="activity")(
+            #            # Always created within the context of a Project
+            #            #M("Create", m="create"),
+            #            M("Map", m="map"),
+            #         ),
+            #     )
         elif has_role("AUTHENTICATED"):
             # SC Staff inc Senior Managers
             return M(c="project")(
@@ -322,5 +395,25 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("Funding", f="organisation", m="report"),
                      ),
                  )
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def stats():
+        """ Statistics """
+
+        return M(c="stats")(
+                    M("Demographics", f="demographic")(
+                        M("Create", m="create"),
+                    ),
+                    M("Demographic Data", f="demographic_data", args="summary")(
+                        M("Create", m="create"),
+                        # Not usually dis-aggregated
+                        M("Time Plot", m="timeplot"),
+                        M("Import", m="import"),
+                    ),
+                    M("Impact Types", f="impact_type")(
+                        M("Create", m="create"),
+                    ),
+                )
 
 # END =========================================================================

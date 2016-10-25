@@ -394,44 +394,55 @@ textarea {
   height: 60px;
 }
 /* line 10, ../scss/custom/_rheader.scss */
+#rheader .rheader-avatar {
+  clear: none;
+  display: inline;
+  float: none;
+  margin-right: 1rem;
+  padding: 0;
+  vertical-align: text-top;
+}
+/* line 18, ../scss/custom/_rheader.scss */
 #rheader table {
+  display: inline;
   margin-bottom: 10px;
   border: none;
 }
-/* line 13, ../scss/custom/_rheader.scss */
+/* line 22, ../scss/custom/_rheader.scss */
 #rheader table tr {
   background: none;
 }
 
 /* RHeader Tabs */
-/* line 20, ../scss/custom/_rheader.scss */
+/* line 29, ../scss/custom/_rheader.scss */
 div.tabs {
+  display: block;
   border-bottom: 1px solid #006A71;
   clear: left;
-  height: 2.125em;
+  height: 2.15em;
   margin: 5px 0 0;
   padding: 0.5em 0;
   text-align: left;
   width: 100%;
   line-height: 0.975rem;
 }
-/* line 31, ../scss/custom/_rheader.scss */
+/* line 41, ../scss/custom/_rheader.scss */
 div.tabs span {
   float: left;
   border-radius: 3px 3px 0 0;
   padding: 0.15em 6px 0.25em 5px;
 }
-/* line 36, ../scss/custom/_rheader.scss */
+/* line 46, ../scss/custom/_rheader.scss */
 div.tabs span a {
   color: #ffffff !important;
   text-decoration: none !important;
   background: transparent !important;
 }
-/* line 41, ../scss/custom/_rheader.scss */
+/* line 51, ../scss/custom/_rheader.scss */
 div.tabs span a:hover {
   background: transparent !important;
 }
-/* line 45, ../scss/custom/_rheader.scss */
+/* line 55, ../scss/custom/_rheader.scss */
 div.tabs span.tab_here {
   background: #ffffff;
   border-color: #006A71;
@@ -444,22 +455,22 @@ div.tabs span.tab_here {
   display: inline;
   font-weight: bold;
   margin-right: 5px;
-  padding: 0.2em 6px 0.25em 5px;
+  padding: 0.25em 6px 0.25em 5px;
   position: relative;
 }
-/* line 64, ../scss/custom/_rheader.scss */
+/* line 74, ../scss/custom/_rheader.scss */
 div.tabs span.tab_here:hover {
   background: #f1edec;
 }
-/* line 67, ../scss/custom/_rheader.scss */
+/* line 77, ../scss/custom/_rheader.scss */
 div.tabs span.tab_here a {
   color: #666666 !important;
 }
-/* line 70, ../scss/custom/_rheader.scss */
+/* line 80, ../scss/custom/_rheader.scss */
 div.tabs span.tab_here a:hover {
   color: #666666 !important;
 }
-/* line 74, ../scss/custom/_rheader.scss */
+/* line 84, ../scss/custom/_rheader.scss */
 div.tabs span.tab_last,
 div.tabs span.tab_other {
   font-size: 90%;
@@ -470,18 +481,18 @@ div.tabs span.tab_other {
   margin-right: 3px;
   margin-top: 0.25em;
 }
-/* line 86, ../scss/custom/_rheader.scss */
+/* line 96, ../scss/custom/_rheader.scss */
 div.tabs span.tab_last:hover,
 div.tabs span.tab_other:hover {
   background: #00555a;
   border-color: #00555a;
 }
-/* line 91, ../scss/custom/_rheader.scss */
+/* line 101, ../scss/custom/_rheader.scss */
 div.tabs span.tab_last a,
 div.tabs span.tab_other a {
   color: #ffffff !important;
 }
-/* line 95, ../scss/custom/_rheader.scss */
+/* line 105, ../scss/custom/_rheader.scss */
 div.tabs span.tab_last a:hover,
 div.tabs span.tab_other a:hover {
   color: #ffffff !important;
@@ -1094,7 +1105,7 @@ h4.profile-sub-header {
 .org-logo {
   vertical-align: top;
   display: inline-block;
-  padding: 0.5rem 0.5rem 0.5rem 0;
+  padding: 0.4rem 0.5rem 0.3rem 0;
 }
 
 /* line 6, ../scss/custom/_misc.scss */
@@ -1232,8 +1243,8 @@ h4.profile-sub-header {
 
 /* line 99, ../scss/custom/_misc.scss */
 .event-type-setting {
-  color: black;
-  font-size: 1.1rem;
+  color: #afafaf;
+  font-size: 0.9rem;
   margin-left: 0.8rem;
   vertical-align: text-top;
 }
@@ -1296,4 +1307,23 @@ body.rtl .username i.icon, body.rtl .username i.fa {
 /* line 149, ../scss/custom/_misc.scss */
 body.rtl .event-type-header {
   text-align: left;
+}
+
+/* line 155, ../scss/custom/_misc.scss */
+.event-registration-blocked {
+  background-color: #FFAAAA;
+  color: black;
+  padding: 0.2rem 0.5rem;
+  margin: 0.2rem 0.6rem;
+}
+
+/* line 161, ../scss/custom/_misc.scss */
+.check-in-warning {
+  color: red;
+  font-weight: bold;
+  margin-left: 0.5rem;
+}
+/* line 165, ../scss/custom/_misc.scss */
+.check-in-warning i {
+  margin-right: 0.3rem;
 }

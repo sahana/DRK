@@ -341,9 +341,10 @@ class S3Resource(object):
             hook.table = table
         else:
             table_alias = None
+            table = hook.table
 
         # Create as resource
-        component = S3Resource(hook.table,
+        component = S3Resource(table,
                                parent = self,
                                alias = alias,
                                linktable = hook.linktable,
@@ -369,44 +370,55 @@ class S3Resource(object):
         component.multiple = hook.multiple
         component.defaults = hook.defaults
 
-        if isinstance(filterby, dict):
+        if not filterby:
+            # Can use filterby=False to enforce table aliasing yet
+            # suppress component filtering (useful e.g. with two
+            # foreign key links from the same table)
+            component.filter = None
+
+        else:
             # Filter by multiple criteria
             query = None
-            table = hook.table
             for k, v in filterby.items():
-                is_list = isinstance(v, (tuple, list))
-                if is_list and len(v) == 1:
-                    filterfor = v[0]
-                    is_list = False
+                if isinstance(v, FS):
+                    # Match a field in the master table
+                    # => identify the field
+                    try:
+                        rfield = v.resolve(self)
+                    except (AttributeError, SyntaxError):
+                        if current.response.s3.debug:
+                            raise
+                        else:
+                            current.log.error(sys.exc_info()[1])
+                            continue
+                    # => must be a real field in the master table
+                    field = rfield.field
+                    if not field or field.table != self.table:
+                        current.log.error("Component filter for %s<=%s: "
+                                          "invalid lookup field '%s'" %
+                                          (self.tablename, alias, v.name))
+                        continue
+                    subquery = (table[k] == field)
                 else:
-                    filterfor = v
-                if not is_list:
-                    subquery = (table[k] == filterfor)
-                else:
-                    subquery = (table[k].belongs(set(filterfor)))
+                    is_list = isinstance(v, (tuple, list))
+                    if is_list and len(v) == 1:
+                        filterfor = v[0]
+                        is_list = False
+                    else:
+                        filterfor = v
+                    if not is_list:
+                        subquery = (table[k] == filterfor)
+                    elif filterfor:
+                        subquery = (table[k].belongs(set(filterfor)))
+                    else:
+                        continue
                 if subquery:
                     if query is None:
                         query = subquery
                     else:
                         query &= subquery
+
             component.filter = query
-        elif not filterby:
-            # Can use filterby=False to enforce table aliasing yet
-            # suppress component filtering (useful e.g. with two
-            # foreign key links from the same table)
-            component.filter = None
-        else:
-            filterfor = hook.filterfor
-            is_list = isinstance(filterfor, (tuple, list))
-            if is_list and len(filterfor) == 1:
-                is_list = False
-                filterfor = filterfor[0]
-            if not is_list:
-                component.filter = (hook.table[hook.filterby] == filterfor)
-            elif filterfor:
-                component.filter = (hook.table[hook.filterby].belongs(filterfor))
-            else:
-                component.filter = None
 
         # Copy properties to the link
         if component.link is not None:
@@ -422,7 +434,6 @@ class S3Resource(object):
             self.links[link.name] = link
 
         self.components[alias] = component
-        return
 
     # -------------------------------------------------------------------------
     # Query handling
@@ -1313,31 +1324,35 @@ class S3Resource(object):
             fields = [f.name for f in self.readable_fields()]
         selectors = list(fields)
 
-        # Automatically include the record ID
         table = self.table
-        if table._id.name not in selectors:
-            fields.insert(0, table._id.name)
-            selectors.insert(0, table._id.name)
+
+        # Automatically include the record ID
+        table_id = table._id
+        pkey = table_id.name
+        if pkey not in selectors:
+            fields.insert(0, pkey)
+            selectors.insert(0, pkey)
 
         # Skip representation of IDs in data tables
-        id_repr = table._id.represent
-        table._id.represent = None
+        id_repr = table_id.represent
+        table_id.represent = None
 
         # Extract the data
         data = self.select(selectors,
-                           start=start,
-                           limit=limit,
-                           orderby=orderby,
-                           left=left,
-                           distinct=distinct,
-                           count=True,
-                           getids=getids,
-                           represent=True)
+                           start = start,
+                           limit = limit,
+                           orderby = orderby,
+                           left = left,
+                           distinct = distinct,
+                           count = True,
+                           getids = getids,
+                           represent = True,
+                           )
 
-        rows = data["rows"]
+        rows = data.rows
 
         # Restore ID representation
-        table._id.represent = id_repr
+        table_id.represent = id_repr
 
         # Empty table - or just no match?
         empty = False
@@ -1346,16 +1361,16 @@ class S3Resource(object):
             if DELETED in table:
                 query = (table[DELETED] != True)
             else:
-                query = (table._id > 0)
-            row = current.db(query).select(table._id, limitby=(0, 1)).first()
+                query = (table_id > 0)
+            row = current.db(query).select(table_id, limitby=(0, 1)).first()
             if not row:
                 empty = True
 
         # Generate the data table
-        rfields = data["rfields"]
+        rfields = data.rfields
         dt = S3DataTable(rfields, rows, orderby=orderby, empty=empty)
 
-        return dt, data["numrows"], data["ids"]
+        return dt, data.numrows, data.ids
 
     # -------------------------------------------------------------------------
     def datalist(self,
@@ -1392,36 +1407,40 @@ class S3Resource(object):
             fields = [f.name for f in self.readable_fields()]
         selectors = list(fields)
 
-        # Automatically include the record ID
         table = self.table
-        if table._id.name not in selectors:
-            fields.insert(0, table._id.name)
-            selectors.insert(0, table._id.name)
+
+        # Automatically include the record ID
+        pkey = table._id.name
+        if pkey not in selectors:
+            fields.insert(0, pkey)
+            selectors.insert(0, pkey)
 
         # Extract the data
         data = self.select(selectors,
-                           start=start,
-                           limit=limit,
-                           orderby=orderby,
-                           left=left,
-                           distinct=distinct,
-                           count=True,
-                           getids=getids,
-                           raw_data=True,
-                           represent=True)
+                           start = start,
+                           limit = limit,
+                           orderby = orderby,
+                           left = left,
+                           distinct = distinct,
+                           count = True,
+                           getids = getids,
+                           raw_data = True,
+                           represent = True,
+                           )
 
         # Generate the data list
-        numrows = data["numrows"]
+        numrows = data.numrows
         dl = S3DataList(self,
                         fields,
-                        data["rows"],
-                        list_id=list_id,
-                        start=start,
-                        limit=limit,
-                        total=numrows,
-                        layout=layout)
+                        data.rows,
+                        list_id = list_id,
+                        start = start,
+                        limit = limit,
+                        total = numrows,
+                        layout = layout,
+                        )
 
-        return dl, numrows, data["ids"]
+        return dl, numrows, data.ids
 
     # -------------------------------------------------------------------------
     def json(self,
@@ -3200,12 +3219,15 @@ class S3Resource(object):
         fkey = None
         table = self.table
 
-        if self.parent and self.linked is None:
-            component = self.parent.components.get(self.alias, None)
+        parent = self.parent
+        linked = self.linked
+
+        if parent and linked is None:
+            component = parent.components.get(self.alias, None)
             if component:
                 fkey = component.fkey
-        elif self.linked is not None:
-            component = self.linked
+        elif linked is not None:
+            component = linked
             if component:
                 fkey = component.lkey
 
@@ -3237,21 +3259,25 @@ class S3Resource(object):
         prefix = lambda s: "~.%s" % s \
                            if "." not in s.split("$", 1)[0] else s
 
+        display_fields = set()
+        add = display_fields.add
+
         # Store field selectors
-        display_fields = []
-        append = display_fields.append
-        for _s in selectors:
-            if isinstance(_s, tuple):
-                s = _s[-1]
+        for item in selectors:
+            if not item:
+                continue
+            elif type(item) is tuple:
+                item = item[-1]
+            if isinstance(item, str):
+                selector = item
+            elif isinstance(item, S3ResourceField):
+                selector = item.selector
+            elif isinstance(item, FS):
+                selector = item.name
             else:
-                s = _s
-            if isinstance(s, S3ResourceField):
-                selector = s.selector
-            elif isinstance(s, FS):
-                selector = s.name
-            else:
-                selector = s
-            append(prefix(selector))
+                continue
+            add(prefix(selector))
+
         slist = list(selectors)
 
         # Collect extra fields from virtual tables
@@ -3268,14 +3294,16 @@ class S3Resource(object):
 
         distinct = False
 
+        columns = set()
+        add_column = columns.add
 
         rfields = []
-        columns = []
         append = rfields.append
+
         for s in slist:
 
             # Allow to override the field label
-            if isinstance(s, tuple):
+            if type(s) is tuple:
                 label, selector = s
             else:
                 label, selector = None, s
@@ -3301,6 +3329,13 @@ class S3Resource(object):
             if rfield.field is None and not rfield.virtual:
                 continue
 
+            # De-duplicate columns
+            colname = rfield.colname
+            if colname in columns:
+                continue
+            else:
+                add_column(colname)
+
             # Replace default label
             if label is not None:
                 rfield.label = label
@@ -3310,12 +3345,6 @@ class S3Resource(object):
                 head = rfield.selector.split("$", 1)[0]
                 if "." in head and head.split(".")[0] not in ("~", self.alias):
                     continue
-
-            # De-duplicate columns
-            if rfield.colname in columns:
-                continue
-            else:
-                columns.append(rfield.colname)
 
             # Resolve the joins
             if rfield.distinct:
@@ -3974,23 +4003,28 @@ class S3Resource(object):
             Get the list_fields for this resource
 
             @param key: alternative key for the table configuration
-            @param id_column: True/False, whether to include the record ID
-                              or not, or 0 to enforce the record ID to be
-                              the first column
+            @param id_column: - False to exclude the record ID
+                              - True to include it if it is configured
+                              - 0 to make it the first column regardless
+                                whether it is configured or not
         """
 
         list_fields = self.get_config(key, None)
+
         if not list_fields and key != "list_fields":
             list_fields = self.get_config("list_fields", None)
         if not list_fields:
             list_fields = [f.name for f in self.readable_fields()]
 
-        pkey = _pkey = self._id.name
+        id_field = pkey = self._id.name
+
+        # Do not include the parent key for components
         if self.parent and not self.link and \
            not current.response.s3.component_show_key:
             fkey = self.fkey
         else:
             fkey = None
+
         fields = []
         append = fields.append
         selectors = set()
@@ -3999,14 +4033,93 @@ class S3Resource(object):
             selector = f[1] if type(f) is tuple else f
             if fkey and selector == fkey:
                 continue
-            if selector == _pkey and not id_column:
-                pkey = f
+            if selector == pkey and not id_column:
+                id_field = f
             elif selector not in selectors:
                 seen(selector)
                 append(f)
+
         if id_column is 0:
-            fields.insert(0, pkey)
+            fields.insert(0, id_field)
+
         return fields
+
+    # -------------------------------------------------------------------------
+    def get_defaults(self, master, defaults=None, data=None):
+        """
+            Get implicit defaults for new component records
+
+            @param master: the master record
+            @param defaults: any explicit defaults
+            @param data: any actual values for the new record
+
+            @return: a dict of {fieldname: values} with the defaults
+        """
+
+        values = {}
+
+        parent = self.parent
+        if not parent:
+            # Not a component
+            return values
+
+        # Implicit defaults from component filters
+        hook = current.s3db.get_component(parent.tablename, self.alias)
+        filterby = hook.get("filterby")
+        if filterby:
+            for (k, v) in filterby.items():
+                if not isinstance(v, (tuple, list)):
+                    values[k] = v
+
+        # Explicit defaults from component hook
+        if self.defaults:
+            values.update(self.defaults)
+
+        # Explicit defaults from caller
+        if defaults:
+            values.update(defaults)
+
+        # Actual record values
+        if data:
+            values.update(data)
+
+        # Check for values to look up from master record
+        lookup = {}
+        for (k, v) in list(values.items()):
+            # Skip nonexistent fields and parent key (fkey)
+            if k not in self.fields or not self.link and k == self.fkey:
+                del values[k]
+                continue
+            # Resolve any field selectors
+            if isinstance(v, FS):
+                try:
+                    rfield = v.resolve(parent)
+                except (AttributeError, SyntaxError):
+                    continue
+                field = rfield.field
+                if not field or field.table != parent.table:
+                    continue
+                if field.name in master:
+                    values[k] = master[field.name]
+                else:
+                    del values[k]
+                    lookup[field.name] = k
+
+        # Do we need to reload the master record to look up values?
+        if lookup:
+            row = None
+            parent_id = parent._id
+            record_id = master.get(parent_id.name)
+            if record_id:
+                fields = [parent.table[f] for f in lookup]
+                row = current.db(parent_id == record_id).select(limitby = (0, 1),
+                                                                *fields).first()
+            if row:
+                for (k, v) in lookup.items():
+                    if k in row:
+                        values[v] = row[k]
+
+        return values
 
     # -------------------------------------------------------------------------
     @property

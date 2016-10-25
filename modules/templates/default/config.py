@@ -109,8 +109,12 @@ def config(settings):
     #settings.auth.terms_of_service = True
     # Uncomment this to allow users to Login using Gmail's SMTP
     #settings.auth.gmail_domains = ["gmail.com"]
+    # Uncomment this to allow users to Login using Office365's SMTP
+    #settings.auth.office365_domains = ["microsoft.com"]
     # Uncomment this to allow users to Login using OpenID
     #settings.auth.openid = True
+    # Uncomment this to block password changes since managed externally (OpenID / SMTP / LDAP)
+    #settings.auth.password_changes = True
     # Uncomment this to enable presence records on login based on HTML5 geolocations
     #settings.auth.set_presence_on_login = True
     # Uncomment this and specify a list of location levels to be ignored by presence records
@@ -510,7 +514,21 @@ def config(settings):
     #settings.event.types_hierarchical = True
     # Make Incident Types Hierarchical
     #settings.event.incident_types_hierarchical = True
-    # Show tab with teams assigned for incidents
+    # Uncomment to allow the use of Exercise Events
+    #settings.event.exercise = True
+    # Show tab for Event Dispatch
+    #settings.event.dispatch_tab = False
+    # Hide tab for Event Impacts
+    #settings.event.impact_tab = False
+    # Hide tab for Event Collection Targets
+    #settings.event.target_tab = False
+    # Hide tab for Event Collections
+    #settings.event.collection_tab = False
+    # Hide tab for Incident Dispatch
+    #settings.event.incident_dispatch_tab = False
+    # Show tab for Incident Impacts
+    #settings.event.incident_impact_tab = True
+    # Show tab for Incident Teams
     #settings.event.incident_teams_tab = True
 
     # -------------------------------------------------------------------------
@@ -628,8 +646,8 @@ def config(settings):
     #settings.hrm.compose_button = False
     # Uncomment to allow HR records to be deletable rather than just marking them as obsolete
     #settings.hrm.deletable = True
-    # Uncomment to filter certificates by (root) Organisation & hence not allow Certificates from other orgs to be added to a profile (except by Admin)
-    #settings.hrm.filter_certificates = True
+    # Uncomment to hide Job Titles
+    #settings.hrm.use_job_titles = False
     # Uncomment to allow HRs to have multiple Job Titles
     #settings.hrm.multiple_job_titles = True
     # Uncomment to have each root Org use a different Job Title Catalog
@@ -648,6 +666,10 @@ def config(settings):
     #settings.hrm.staff_experience = False
     # Uncomment to enable Volunteer 'active' field
     # - can also be made a function which is called to calculate the status based on recorded hours
+    # Custom label for Organisations in HR module
+    #settings.hrm.organisation_label = "Organization / Branch"
+    # Custom label for Top-level Organisations in HR module
+    #settings.hrm.root_organisation_label = "Organization"
     #settings.hrm.vol_active = True
     # Uncomment to define a Tooltip to show when viewing the Volunteer 'active' field
     #settings.hrm.vol_active_tooltip = "A volunteer is defined as active if they've participated in an average of 8 or more hours of Program work or Trainings per month in the last year"
@@ -663,6 +685,10 @@ def config(settings):
     #settings.hrm.use_awards = False
     # Uncomment to disable the use of HR Certificates
     #settings.hrm.use_certificates = False
+    # Uncomment to filter certificates by (root) Organisation & hence not allow Certificates from other orgs to be added to a profile (except by Admin)
+    #settings.hrm.filter_certificates = True
+    # Uncomment to auto-create certificates for courses
+    #settings.hrm.create_certificates_from_courses = True
     # Uncomment to enable the use of Staff/Volunteer IDs
     #settings.hrm.use_code = True
     # Uncomment to disable the use of HR Credentials
@@ -863,6 +889,8 @@ def config(settings):
     #settings.project.sectors = False
     # Uncomment this to enable Programmes in projects
     #settings.project.programmes = True
+    # Uncomment this to enable Budgets in Programmes
+    #settings.project.programme_budget = True
     # Uncomment this to use Tags in Tasks
     #settings.project.task_tag = True
     # Uncomment this to enable Themes in 3W projects
@@ -912,6 +940,13 @@ def config(settings):
     #settings.base.youtube_id = [dict(id = "introduction",
     #                                 title = T("Introduction"),
     #                                 video_id = "HR-FtR2XkBU"),]
+
+    # -----------------------------------------------------------------------------
+    # Mobile Forms
+    # Configure mobile forms (example), see modules/s3cfg.py for details
+    #settings.mobile.forms = [
+    #    ("Beneficiaries", "pr_person", {"c": "dvr", "f": "person"}),
+    #]
 
     # -----------------------------------------------------------------------------
     # XForms
@@ -1150,6 +1185,12 @@ def config(settings):
         #   restricted = True,
         #   module_type = 10,
         #   #access = "|DVI|",      # Only users with the DVI role can see this module in the default menu & access the controller
+        #)),
+        #("edu", Storage(
+        #    name_nice = T("Schools"),
+        #    #description = "Helps to monitor status of schools",
+        #    restricted = True,
+        #    module_type = 10
         #)),
         #("mpr", Storage(
         #   name_nice = T("Missing Person Registry"),

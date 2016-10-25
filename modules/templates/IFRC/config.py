@@ -558,6 +558,8 @@ def config(settings):
     settings.hrm.use_education = True
     # Custom label for Organisations in HR module
     settings.hrm.organisation_label = "National Society / Branch"
+    # Custom label for Top-level Organisations in HR module
+    settings.hrm.root_organisation_label = "National Society"
     # Uncomment to consolidate tabs into a single CV
     settings.hrm.cv_tab = True
     # Uncomment to consolidate tabs into Staff Record (set to False to hide the tab)
@@ -2716,8 +2718,9 @@ def config(settings):
                                                       "key": "pe_id",
                                                       "fkey": "pe_id",
                                                       "pkey": "person_id",
-                                                      "filterby": "type",
-                                                      "filterfor": ("2",),
+                                                      "filterby": {
+                                                          "type": "2",
+                                                          },
                                                       },
                                         pr_education = ({"name": "current_education",
                                                          "link": "pr_person",
@@ -2725,8 +2728,9 @@ def config(settings):
                                                          "key": "id",
                                                          "fkey": "person_id",
                                                          "pkey": "person_id",
-                                                         "filterby": "current",
-                                                         "filterfor": (True,),
+                                                         "filterby": {
+                                                             "current": True,
+                                                             },
                                                          "multiple": False,
                                                          },
                                                         {"name": "previous_education",
@@ -2735,8 +2739,9 @@ def config(settings):
                                                          "key": "id",
                                                          "fkey": "person_id",
                                                          "pkey": "person_id",
-                                                         "filterby": "current",
-                                                         "filterfor": (False,),
+                                                         "filterby": {
+                                                             "current": False,
+                                                             },
                                                          "multiple": False,
                                                          },
                                                         ),
@@ -2746,8 +2751,9 @@ def config(settings):
                                                     "key": "pe_id",
                                                     "fkey": "pe_id",
                                                     "pkey": "person_id",
-                                                    "filterby": "profile",
-                                                    "filterfor": (True,),
+                                                    "filterby": {
+                                                        "profile": True,
+                                                        },
                                                     "multiple": False,
                                                     },
                                         )
@@ -3866,8 +3872,9 @@ def config(settings):
                                                "key": "pe_id",
                                                "fkey": "pe_id",
                                                "pkey": "person_id",
-                                               "filterby": "type",
-                                               "filterfor": ("2",),
+                                               "filterby": {
+                                                   "type": "2",
+                                                   },
                                                },
                                               {"name": "temp_address",
                                                "link": "pr_person",
@@ -3875,8 +3882,9 @@ def config(settings):
                                                "key": "pe_id",
                                                "fkey": "pe_id",
                                                "pkey": "person_id",
-                                               "filterby": "type",
-                                               "filterfor": ("1",),
+                                               "filterby": {
+                                                   "type": "1",
+                                                   },
                                                },
                                               ),
                                 pr_contact = {"link": "pr_person",
@@ -3884,8 +3892,9 @@ def config(settings):
                                               "key": "pe_id",
                                               "fkey": "pe_id",
                                               "pkey": "person_id",
-                                              "filterby": "contact_method",
-                                              "filterfor": ("SMS",),
+                                              "filterby": {
+                                                  "contact_method": "SMS",
+                                                  },
                                               },
                                 pr_contact_emergency = {"link": "pr_person",
                                                         "joinby": "id",
@@ -3905,8 +3914,9 @@ def config(settings):
                                                "key": "id",
                                                "fkey": "person_id",
                                                "pkey": "person_id",
-                                               "filterby": "type",
-                                               "filterfor": (2,),
+                                               "filterby": {
+                                                   "type": 2,
+                                                   },
                                                "multiple": False,
                                                },
                                 pr_image = {"link": "pr_person",
@@ -3914,8 +3924,9 @@ def config(settings):
                                             "key": "pe_id",
                                             "fkey": "pe_id",
                                             "pkey": "person_id",
-                                            "filterby": "profile",
-                                            "filterfor": (True,),
+                                            "filterby": {
+                                                "profile": True,
+                                                },
                                             "multiple": False,
                                             },
                                 pr_person_details = {"link": "pr_person",
@@ -4706,38 +4717,45 @@ def config(settings):
             add_components("pr_person",
                            pr_identity = {"name": "idcard",
                                           "joinby": "person_id",
-                                          "filterby": "type",
-                                          "filterfor": (2,),
+                                          "filterby": {
+                                              "type": 2,
+                                              },
                                           "multiple": False,
                                           },
                            pr_person_tag = ({"name": "pte",
                                              "joinby": "person_id",
-                                             "filterby": "tag",
-                                             "filterfor": (PTE_TAG,),
+                                             "filterby": {
+                                                 "tag": PTE_TAG,
+                                                 },
                                              "multiple": False,
-                                             "defaults": {"tag": PTE_TAG,
-                                                          },
+                                             "defaults": {
+                                                 "tag": PTE_TAG,
+                                                 },
                                              },
                                             {"name": "sme",
                                              "joinby": "person_id",
-                                             "filterby": "tag",
-                                             "filterfor": (SME_TAG,),
+                                             "filterby": {
+                                                 "tag": SME_TAG,
+                                                 },
                                              "multiple": False,
-                                             "defaults": {"tag": SME_TAG,
-                                                          },
+                                             "defaults": {
+                                                 "tag": SME_TAG,
+                                                 },
                                              },
                                             ),
                            )
             add_components("hrm_human_resource",
                            hrm_insurance = ({"name": "social_insurance",
                                              "joinby": "human_resource_id",
-                                             "filterby": "type",
-                                             "filterfor": "SOCIAL",
+                                             "filterby": {
+                                                 "type": "SOCIAL",
+                                                 },
                                              },
                                             {"name": "health_insurance",
                                              "joinby": "human_resource_id",
-                                             "filterby": "type",
-                                             "filterfor": "HEALTH",
+                                             "filterby": {
+                                                 "type": "HEALTH",
+                                                 },
                                              }),
                            )
             # Remove 'Commune' level for Addresses
@@ -4909,14 +4927,16 @@ def config(settings):
                 s3db.add_components("pr_person",
                                     pr_address = {"name": "perm_address",
                                                   "joinby": "pe_id",
-                                                  "filterby": "type",
-                                                  "filterfor": ("2",),
+                                                  "filterby": {
+                                                      "type": 2,
+                                                      },
                                                   "multiple": False,
                                                   },
                                     pr_education = {"name": "previous_education",
                                                     "joinby": "person_id",
-                                                    "filterby": "current",
-                                                    "filterfor": (False,),
+                                                    "filterby": {
+                                                        "current": False,
+                                                        },
                                                     "multiple": False,
                                                     },
                                     )
@@ -4943,8 +4963,9 @@ def config(settings):
                     s3db.add_components("pr_person",
                                         hrm_human_resource = {"name": "volunteer",
                                                               "joinby": "person_id",
-                                                              "filterby": "type",
-                                                              "filterfor": ("2",),
+                                                              "filterby": {
+                                                                  "type": 2,
+                                                                  },
                                                               "multiple": False,
                                                               },
                                         #hrm_training = {"name": "vol_training",
@@ -4954,8 +4975,9 @@ def config(settings):
                                         #                },
                                         pr_education = {"name": "current_education",
                                                         "joinby": "person_id",
-                                                        "filterby": "current",
-                                                        "filterfor": (True,),
+                                                        "filterby": {
+                                                            "current": True,
+                                                            },
                                                         "multiple": False,
                                                         },
                                         vol_details = {"name": "volunteer_details",
@@ -5085,8 +5107,9 @@ def config(settings):
                                         #                },
                                         pr_address = {"name": "temp_address",
                                                       "joinby": "pe_id",
-                                                      "filterby": "type",
-                                                      "filterfor": ("1",),
+                                                      "filterby": {
+                                                          "type": 1,
+                                                          },
                                                       "multiple": False,
                                                       },
                                         )

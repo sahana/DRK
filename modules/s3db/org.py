@@ -703,8 +703,9 @@ class S3OrganisationModel(S3Model):
                                                 },
                                                {"name": "active_service_location",
                                                 "joinby": "organisation_id",
-                                                "filterby": "status",
-                                                "filterfor": "ACTIVE",
+                                                "filterby": {
+                                                    "status": "ACTIVE",
+                                                    },
                                                 },
                                                ),
                        # Format for filter_widget
@@ -5875,43 +5876,47 @@ def org_rheader(r, tabs=[]):
         #    sectors = TR(TH("%s: " % sector_label),
         #                 table.sector_id.represent(record.sector_id))
         # else:
-        #    sectors = ""
+        #    sectors = None
 
         if record.website:
             website = TR(TH("%s: " % table.website.label),
                          A(record.website, _href=record.website))
         else:
-            website = ""
+            website = None
 
         if record.root_organisation != record.id:
             btable = s3db.org_organisation_branch
             query = (btable.branch_id == record.id) & \
                     (btable.organisation_id == table.id)
-            parent = current.db(query).select(table.id,
-                                              table.name,
-                                              limitby=(0, 1)
-                                              ).first()
-            if parent:
+            row = current.db(query).select(table.id,
+                                           table.name,
+                                           limitby=(0, 1)
+                                           ).first()
+            if row:
                 parent = TR(TH("%s: " % T("Branch of")),
-                             A(parent.name, _href=URL(args=[parent.id, "read"])))
+                            A(row.name, _href=URL(args=[row.id, "read"])),
+                            )
             else:
-                parent = ""
+                parent = None
         else:
-            parent = ""
+            parent = None
 
         rheader = DIV()
         logo = org_organisation_logo(record)
-        rData = TABLE(TR(TH("%s: " % table.name.label),
-                         record.name,
-                         ),
-                      parent,
-                      website,
-                      #sectors,
+
+        record_data = TABLE(TR(TH("%s: " % table.name.label),
+                               record.name,
+                               ),
                       )
+        for item in (parent, website): #, sectors):
+            if item is not None:
+                record_data.append(item)
+
         if logo:
-            rheader.append(TABLE(TR(TD(logo), TD(rData))))
+            rheader.append(TABLE(TR(TD(logo), TD(record_data))))
         else:
-            rheader.append(rData)
+            rheader.append(record_data)
+
         rheader.append(rheader_tabs)
 
     elif tablename in ("org_office", "org_facility"):
@@ -6122,8 +6127,9 @@ def org_organisation_controller():
                                 add_component(tablename,
                                               org_organisation_tag = {"name": tag,
                                                                       "joinby": "organisation_id",
-                                                                      "filterby": "tag",
-                                                                      "filterfor": (tag,),
+                                                                      "filterby": {
+                                                                          "tag": tag,
+                                                                          },
                                                                       },
                                               )
                                 lappend((label, "%s.value" % tag))
@@ -6403,13 +6409,22 @@ def org_office_controller():
                     field = table.organisation_id
                     field.default = org_id
                     field.readable = field.writable = False
+
             elif r.id:
                 table.obsolete.readable = table.obsolete.writable = True
-            elif r.representation == "geojson":
-                marker_fn = s3db.get_config("org_office", marker_fn)
-                if marker_fn:
-                    # Load these models now as they'll be needed when we encode
-                    mtable = s3db.gis_marker
+
+        elif r.representation == "geojson":
+            marker_fn = s3db.get_config("org_office", marker_fn)
+            if marker_fn:
+                # Load these models now as they'll be needed when we encode
+                mtable = s3db.gis_marker
+
+        elif r.representation == "xls":
+            list_fields = r.resource.get_config("list_fields")
+            list_fields += ["location_id$lat",
+                            "location_id$lon",
+                            "location_id$inherited",
+                            ]
 
         return True
     s3.prep = prep
@@ -6562,12 +6577,12 @@ def org_facility_controller():
     s3.prep = prep
 
     def postp(r, output):
-        if r.representation == "plain":
+        record = r.record
+        if r.representation == "plain" and record:
             # Custom Map Popup
             T = current.T
             output = TABLE()
             append = output.append
-            record = r.record
             # Edit button
             append(TR(TD(A(T("Edit"),
                            _target="_blank",

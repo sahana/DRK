@@ -70,6 +70,7 @@ class DVRCaseModel(S3Model):
     names = ("dvr_case",
              "dvr_case_id",
              "dvr_case_language",
+             "dvr_case_details",
              "dvr_case_status",
              "dvr_case_status_id",
              "dvr_case_type",
@@ -517,6 +518,9 @@ class DVRCaseModel(S3Model):
         self.add_components(tablename,
                             dvr_beneficiary_data = "case_id",
                             dvr_case_activity = "case_id",
+                            dvr_case_details = {"joinby": "case_id",
+                                                "multiple": False,
+                                                },
                             dvr_case_event = "case_id",
                             dvr_case_service_contact = "case_id",
                             dvr_economy = {"joinby": "case_id",
@@ -604,6 +608,24 @@ class DVRCaseModel(S3Model):
                                                 ),
                            ),
                      s3_comments(),
+                     *s3_meta_fields())
+
+        # ---------------------------------------------------------------------
+        # Case Details: extended attributes for DVR cases
+        #
+        tablename = "dvr_case_details"
+        define_table(tablename,
+                     case_id(empty = False,
+                             ondelete = "CASCADE",
+                             ),
+                     person_id(empty = False,
+                               ondelete = "CASCADE",
+                               ),
+                     Field("registered", "boolean",
+                           default = True,
+                           label = T("Officially Registered"),
+                           represent = s3_yes_no_represent,
+                           ),
                      *s3_meta_fields())
 
         # ---------------------------------------------------------------------
@@ -2519,6 +2541,16 @@ class DVRCaseEventModel(S3Model):
                                          ),
                            requires = IS_EMPTY_OR(IS_FLOAT_IN_RANGE(0.0, None)),
                            ),
+                     Field("presence_required", "boolean",
+                           default = True,
+                           label = T("Presence required"),
+                           represent = s3_yes_no_represent,
+                           comment = DIV(_class = "tooltip",
+                                         _title = "%s|%s" % (T("Presence required"),
+                                                             T("This event type requires the presence of the person concerned"),
+                                                             ),
+                                         ),
+                           ),
                      s3_comments(),
                      *s3_meta_fields())
 
@@ -2589,11 +2621,13 @@ class DVRCaseEventModel(S3Model):
                                  future = 0,
                                  writable = False,
                                  ),
-                     # Generic quantity field for statistical purposes
-                     Field("quantity", "double",
+                     # Field for quantitative recording of case events
+                     # for statistical purposes (without linking them to
+                     # individual cases)
+                     Field("quantity", "integer",
                            label = T("Quantity"),
-                           default = 1.0,
-                           requires = IS_EMPTY_OR(IS_FLOAT_IN_RANGE(0.0, None)),
+                           default = 1,
+                           requires = IS_EMPTY_OR(IS_INT_IN_RANGE(0, None)),
                            # activate in template as required
                            readable = False,
                            writable = False,
@@ -3729,13 +3763,7 @@ class DVRRegisterCaseEvent(S3Method):
         intervals = {}
         if person:
             # Person details
-            name = s3_fullname(person)
-            dob = person.date_of_birth
-            if dob:
-                dob = S3DateTime.date_represent(dob)
-                person_data = "%s (%s %s)" % (name, T("Date of Birth"), dob)
-            else:
-                person_data = name
+            person_details = self.person_details(person)
 
             # Blocking periods for events
             event_types = self.get_event_types()
@@ -3762,7 +3790,7 @@ class DVRRegisterCaseEvent(S3Method):
                                   "i": s3_str(T(instructions)),
                                   })
         else:
-            person_data = ""
+            person_details = ""
             permitted = False
 
         # Identify the event type
@@ -3794,7 +3822,7 @@ class DVRRegisterCaseEvent(S3Method):
 
         data = {"id": "",
                 "label": pe_label,
-                "person": person_data,
+                "person": person_details,
                 "flaginfo": "",
                 }
 
@@ -4086,14 +4114,9 @@ class DVRRegisterCaseEvent(S3Method):
             if check:
 
                 # Person details
-                name = s3_fullname(person)
-                dob = person.date_of_birth
-                if dob:
-                    dob = S3DateTime.date_represent(dob)
-                    person_data = "%s (%s %s)" % (name, T("Date of Birth"), dob)
-                else:
-                    person_data = name
-                output["p"] = s3_str(person_data)
+                person_details = self.person_details(person)
+
+                output["p"] = s3_str(person_details)
                 output["l"] = person.pe_label
 
                 # Family details
@@ -4422,6 +4445,61 @@ class DVRRegisterCaseEvent(S3Method):
                                  }
                     output[type_id_] = (msg, earliest)
 
+        return output
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def person_details(person):
+        """
+            Format the person details
+
+            @param person: the person record (Row)
+        """
+
+        T = current.T
+        settings = current.deployment_settings
+
+        name = s3_fullname(person)
+        dob = person.date_of_birth
+        if dob:
+            dob = S3DateTime.date_represent(dob)
+            details = "%s (%s %s)" % (name, T("Date of Birth"), dob)
+        else:
+            details = name
+
+        output = SPAN(details,
+                      _class = "person-details",
+                      )
+
+        if settings.get_dvr_event_registration_checkin_warning():
+
+            table = current.s3db.cr_shelter_registration
+            if table:
+                # Person counts as checked-out when checked-out
+                # somewhere and not checked-in somewhere else
+                query = (table.person_id == person.id) & \
+                        (table.deleted != True)
+                cnt = table.id.count()
+                status = table.registration_status
+                rows = current.db(query).select(status,
+                                                cnt,
+                                                groupby = status,
+                                                )
+                checked_in = checked_out = 0
+                for row in rows:
+                    s = row[status]
+                    if s == 2:
+                        checked_in = row[cnt]
+                    elif s == 3:
+                        checked_out = row[cnt]
+
+                if checked_out and not checked_in:
+                    output = TAG[""](output,
+                                     SPAN(ICON("hint"),
+                                          T("not checked-in!"),
+                                          _class = "check-in-warning",
+                                          ),
+                                     )
         return output
 
     # -------------------------------------------------------------------------
@@ -5498,11 +5576,15 @@ def dvr_update_last_seen(person_id):
 
     # Get the last case event
     etable = s3db.dvr_case_event
+    ettable = s3db.dvr_case_event_type
+    join = ettable.on(ettable.id == etable.type_id)
     query = (etable.person_id == person_id) & \
+            (ettable.presence_required == True) & \
             (etable.date != None) & \
             (etable.date <= now) & \
             (etable.deleted != True)
     event = db(query).select(etable.date,
+                             join = join,
                              orderby = ~etable.date,
                              limitby = (0, 1),
                              ).first()

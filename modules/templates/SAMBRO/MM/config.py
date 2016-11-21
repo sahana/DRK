@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from gluon import current
+from gluon import current, URL
 
 from collections import OrderedDict
 
@@ -12,6 +12,7 @@ def config(settings):
     T = current.T
 
     settings.base.system_name = T("Myanmar Warning and Situational-Awareness System")
+    settings.base.system_name_short = T("DMH")
 
     # Theme (folder to use for views/layout.html)
     settings.base.theme = "SAMBRO.MM"
@@ -27,6 +28,12 @@ def config(settings):
     settings.L10n.languages = languages
 
     # Alert Hub Title
-    settings.cap.alert_hub_title = T("Myanmar Alert Hub Common Operating Picture")
+    settings.cap.alert_hub_title = T("Myanmar Alert Hub Common Alerting Picture")
+
+    # UI Settings
+    settings.ui.menu_logo = URL(c = "static",
+                                f = "themes",
+                                args = ["SAMBRO", "MM", "img", "dmh.png"],
+                                )
 
 # END =========================================================================

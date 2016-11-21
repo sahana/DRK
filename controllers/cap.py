@@ -17,6 +17,14 @@ def index():
     s3_redirect_default(URL(f="alert"))
 
 # -----------------------------------------------------------------------------
+def alerting_authority():
+    """
+        RESTful CRUD controller
+    """
+
+    return s3_rest_controller()
+    
+# -----------------------------------------------------------------------------
 def alert_history():
     """
         RESTful CRUD controller
@@ -984,6 +992,7 @@ def alert():
                            "info.priority",
                            "status",
                            "scope",
+                           "msg_type",
                            "info.event_type_id",
                            "info.description",
                            "info.response_type",

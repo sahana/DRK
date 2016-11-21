@@ -2,7 +2,7 @@
 
 from collections import OrderedDict
 
-from gluon import current, URL
+from gluon import current, H3, SPAN, URL
 from gluon.storage import Storage
 
 def config(settings):
@@ -12,14 +12,14 @@ def config(settings):
 
     T = current.T
 
-    settings.base.system_name = T("Sahana Refugee Case Management")
+    settings.base.system_name = T("Refugee Case Management")
     #settings.base.system_name_short = T("Sahana")
 
     # PrePopulate data
     settings.base.prepopulate += ("STL", "default/users", "STL/Demo")
 
     # Theme (folder to use for views/layout.html)
-    #settings.base.theme = "STL"
+    settings.base.theme = "STL"
 
     # =========================================================================
     # Security/AAA Settings
@@ -110,51 +110,150 @@ def config(settings):
     # =========================================================================
     # DVR Case Management
     #
-    def customise_dvr_case_resource(r, tablename):
+    settings.dvr.activity_use_service_type = True
+    settings.dvr.activity_types = True
+    settings.dvr.activity_types_hierarchical = True
+    settings.dvr.needs_hierarchical = True
+
+    # -------------------------------------------------------------------------
+    def customise_dvr_home():
+        """ Redirect dvr/index to dvr/person?closed=0 """
+
+        from gluon import URL
+        from s3 import s3_redirect_default
+
+        s3_redirect_default(URL(f="person", vars={"closed": "0"}))
+
+    settings.customise_dvr_home = customise_dvr_home
+
+    # -------------------------------------------------------------------------
+    def customise_dvr_economy_resource(r, tablename):
+
+        table = current.s3db.dvr_economy
+        field = table.monthly_costs
+
+        field.label = current.T("Monthly Rent Expense")
+
+    settings.customise_dvr_economy_resource = customise_dvr_economy_resource
+
+    # -------------------------------------------------------------------------
+    def customise_dvr_household_resource(r, tablename):
+
+        from s3 import S3SQLCustomForm, S3SQLInlineComponent
+
+        crud_form = S3SQLCustomForm("hoh_relationship",
+                                    "hoh_name",
+                                    "hoh_date_of_birth",
+                                    "hoh_gender",
+                                    S3SQLInlineComponent("beneficiary_data",
+                                                         fields = [(T("Age Group"), "beneficiary_type_id"),
+                                                                   "female",
+                                                                   "male",
+                                                                   "other",
+                                                                   "in_school",
+                                                                   "employed",
+                                                                   ],
+                                                         label = T("Household Members"),
+                                                         explicit_add = T("Add Household Members"),
+                                                         ),
+                                    "comments",
+                                    )
+
+        current.s3db.configure("dvr_household",
+                               crud_form = crud_form,
+                               )
+
+    settings.customise_dvr_household_resource = customise_dvr_household_resource
+
+    # -------------------------------------------------------------------------
+    def customise_dvr_case_activity_resource(r, tablename):
+
+        from s3 import S3SQLCustomForm, s3_comments_widget
 
         s3db = current.s3db
-        s3 = current.response.s3
 
-        if r.component_name == "dvr_case":
+        # Customise SNF fields
+        ftable = s3db.dvr_activity_funding
+        field = ftable.funding_required
+        field.label = T("Need for SNF")
+        field = ftable.reason_id
+        field.label = T("Justification for SNF")
+        field.comment = None
+        field = ftable.proposal
+        field.label = T("Proposed Assistance for SNF")
+        field.widget = s3_comments_widget
 
-            table = r.component.table
-            field = table.human_resource_id
-            field.label = T("Person Responsible")
-            field.readable = field.writable = True
-            field.widget = None
-            field.comment = None
+        # Custom CRUD form
+        crud_form = S3SQLCustomForm("person_id",
+                                    "service_id",
+                                    "activity_type_id",
+                                    "need_id",
+                                    "followup",
+                                    "followup_date",
+                                    "activity_funding.funding_required",
+                                    "activity_funding.reason_id",
+                                    "activity_funding.proposal",
+                                    "comments",
+                                    )
 
-            # Custom form
-            from s3 import S3SQLCustomForm
-            crud_form = S3SQLCustomForm("person_id",
-                                        "date",
-                                        "organisation_id",
-                                        "human_resource_id",
-                                        "status_id",
-                                        )
+        # Custom list fields
+        list_fields = ["person_id",
+                       "service_id",
+                       "activity_type_id",
+                       "followup",
+                       "followup_date",
+                       ]
 
-            # Filter staff by organisation
-            script = '''$.filterOptionsS3({
- 'trigger':'organisation_id',
- 'target':'human_resource_id',
- 'lookupPrefix':'hrm',
- 'lookupResource':'human_resource',
- 'lookupKey':'organisation_id',
- 'fncRepresent': function(record){return record.person_id},
- 'optional': true
-})'''
-            s3.jquery_ready.append(script)
-
-            s3db.configure("dvr_case",
-                           crud_form = crud_form,
-                           )
-
-        # Deleting cases is not allowed
-        s3db.configure("dvr_case",
-                       deletable = False,
+        s3db.configure("dvr_case_activity",
+                       crud_form = crud_form,
+                       list_fields = list_fields,
                        )
 
-    settings.customise_dvr_case_resource = customise_dvr_case_resource
+    settings.customise_dvr_case_activity_resource = customise_dvr_case_activity_resource
+
+    # -------------------------------------------------------------------------
+    def customise_dvr_activity_funding_reason_resource(r, tablename):
+
+        T = current.T
+
+        table = current.s3db.dvr_activity_funding_reason
+
+        field = table.name
+        field.label = T("SNF Justification")
+
+        crud_strings = current.response.s3.crud_strings
+
+        # CRUD Strings
+        crud_strings["dvr_activity_funding_reason"] = Storage(
+            label_create = T("Create SNF Justification"),
+            title_display = T("SNF Justification"),
+            title_list = T("SNF Justifications"),
+            title_update = T("Edit SNF Justification"),
+            label_list_button = T("List SNF Justifications"),
+            label_delete_button = T("Delete SNF Justification"),
+            msg_record_created = T("SNF Justification created"),
+            msg_record_modified = T("SNF Justification updated"),
+            msg_record_deleted = T("SNF Justification deleted"),
+            msg_list_empty = T("No SNF Justifications currently defined"),
+        )
+
+
+    settings.customise_dvr_activity_funding_reason_resource = customise_dvr_activity_funding_reason_resource
+
+    # -------------------------------------------------------------------------
+    def customise_dvr_activity_funding_resource(r, tablename):
+
+        T = current.T
+
+        table = current.s3db.dvr_activity_funding
+        field = table.funding_required
+        field.label = T("Need for SNF")
+        field = table.reason_id
+        field.label = T("Justification for SNF")
+        field = table.proposal
+        field.label = T("Proposed Assistance for SNF")
+
+    settings.customise_dvr_activity_funding_resource = customise_dvr_activity_funding_resource
 
     # =========================================================================
     # Person Registry
@@ -250,15 +349,35 @@ def config(settings):
 
             controller = r.controller
 
+            archived = r.get_vars.get("archived")
+            if archived in ("1", "true", "yes"):
+                crud_strings = s3.crud_strings["pr_person"]
+                crud_strings["title_list"] = T("Invalid Cases")
+
             if controller == "dvr" and not r.component:
 
                 table = r.table
                 ctable = s3db.dvr_case
 
+                from s3 import IS_ONE_OF, S3HierarchyWidget, S3Represent
+                from gluon import DIV, IS_EMPTY_OR
+
+                # Expose project_id
+                field = ctable.project_id
+                field.readable = field.writable = True
+                represent = S3Represent(lookup = "project_project",
+                                        fields = ["code"],
+                                        )
+                field.represent = represent
+                field.requires = IS_EMPTY_OR(
+                                    IS_ONE_OF(current.db, "project_project.id",
+                                              represent,
+                                              ))
+                field.comment = None
+                field.label = T("Project Code")
+
                 # Hierarchical Organisation Selector
                 field = ctable.organisation_id
-                from gluon import DIV
-                from s3 import S3HierarchyWidget
                 represent = s3db.org_OrganisationRepresent(parent=False)
                 field.widget = S3HierarchyWidget(lookup="org_organisation",
                                                  represent=represent,
@@ -293,6 +412,15 @@ def config(settings):
 })'''
                 s3.jquery_ready.append(script)
 
+                # Visibility and tooltip for consent flag
+                field = ctable.disclosure_consent
+                field.readable = field.writable = True
+                field.comment = DIV(_class="tooltip",
+                                    _title="%s|%s" % (T("Consenting to Data Disclosure"),
+                                                      T("Is the client consenting to disclosure of their data towards partner organisations and authorities?"),
+                                                      ),
+                                    )
+
                 # Custom label for registered-flag
                 dtable = s3db.dvr_case_details
                 field = dtable.registered
@@ -315,15 +443,18 @@ def config(settings):
 
                     # Custom CRUD form
                     crud_form = S3SQLCustomForm(
+                                (T("Case Status"), "dvr_case.status_id"),
                                 "dvr_case.date",
                                 "dvr_case.organisation_id",
                                 "dvr_case.human_resource_id",
+                                "dvr_case.project_id",
                                 "first_name",
                                 #"middle_name",
                                 "last_name",
                                 "person_details.nationality",
                                 "date_of_birth",
                                 "gender",
+                                "person_details.marital_status",
                                 "case_details.registered",
                                 (T("Individual ID Number"), "pe_label"),
                                 S3SQLInlineComponent(
@@ -359,7 +490,9 @@ def config(settings):
                                         multiple = False,
                                         name = "phone",
                                         ),
+                                "dvr_case.disclosure_consent",
                                 "dvr_case.comments",
+                                (T("Invalid Record"), "dvr_case.archived"),
                                 )
 
                     resource.configure(crud_form = crud_form,
@@ -373,12 +506,18 @@ def config(settings):
 
                     # Extend text filter with Family ID and case comments
                     filter_widgets = resource.get_config("filter_widgets")
+                    extend_text_filter = True
                     for fw in filter_widgets:
-                        if isinstance(fw, S3TextFilter):
+                        if fw.field == "dvr_case.status_id":
+                            if fw.field == "dvr_case.status_id" and "closed" in r.get_vars:
+                                fw.opts.default = None
+                                fw.opts.hidden = True
+                        if extend_text_filter and isinstance(fw, S3TextFilter):
                             fw.field.extend(("family_id.value",
                                              "dvr_case.comments",
                                              ))
-                            break
+                            fw.opts.comment = T("You can search by name, ID, family ID and comments")
+                            extend_text_filter = False
 
                     # Add filter for date of birth
                     dob_filter = S3DateFilter("date_of_birth",
@@ -636,6 +775,11 @@ def config(settings):
     settings.customise_project_project_controller = customise_project_project_controller
 
     # =========================================================================
+    # Organisation Registry
+    #
+    settings.org.services_hierarchical = False
+
+    # =========================================================================
     # Modules
     # Comment/uncomment modules here to disable/enable them
     # Modules menu is defined in modules/eden/menu.py
@@ -837,36 +981,69 @@ def stl_dvr_rheader(r, tabs=[]):
 
         if tablename == "pr_person":
 
+            # "Invalid Case" warning
+            hint = lambda record: H3(T("Invalid Case"),
+                                     _class="alert label",
+                                     )
+
             if not tabs:
                 tabs = [(T("Basic Details"), None),
-                        (T("Case Information"), "dvr_case"),
                         (T("Contact"), "contacts"),
+                        (T("Household"), "household"),
+                        (T("Economy"), "economy"),
+                        (T("Activities"), "case_activity"),
                         ]
 
                 case = resource.select(["family_id.value",
+                                        "dvr_case.status_id",
+                                        "dvr_case.archived",
                                         "dvr_case.organisation_id",
+                                        "dvr_case.disclosure_consent",
+                                        "dvr_case.project_id",
                                         ],
                                         represent = True,
                                         raw_data = True,
                                         ).rows
 
-                if case:
-                    case = case[0]
-                    family_id = lambda row: case["pr_family_id_person_tag.value"]
-                    organisation_id = lambda row: case["dvr_case.organisation_id"]
-                else:
+                if not case:
                     return None
+
+                case = case[0]
+
+                case_status = lambda row: case["dvr_case.status_id"]
+                archived = case["_row"]["dvr_case.archived"]
+                family_id = lambda row: case["pr_family_id_person_tag.value"]
+                organisation_id = lambda row: case["dvr_case.organisation_id"]
+                project_id = lambda row: case["dvr_case.project_id"]
                 name = lambda row: s3_fullname(row)
 
+                raw = case._row
+
+                # Render disclosure consent flag as colored label
+                consent = raw["dvr_case.disclosure_consent"]
+                labels = {"Y": "success", "N/A": "warning", "N": "alert"}
+                def disclosure(row):
+                    _class = labels.get(consent, "secondary")
+                    return SPAN(case["dvr_case.disclosure_consent"],
+                                _class = "%s label" % _class,
+                                )
+
                 rheader_fields = [[(T("ID"), "pe_label"),
-                                   (T("Family ID"), family_id),
+                                   (T("Case Status"), case_status),
+                                   (T("Data Disclosure"), disclosure),
+                                   ],
+                                  [(T("Family ID"), family_id),
+                                   (T("Organisation"), organisation_id),
                                    ],
                                   [(T("Name"), name),
-                                   (T("Organisation"), organisation_id),
+                                   (T("Project Code"), project_id),
                                    ],
                                   ["date_of_birth",
                                    ],
                                   ]
+
+                if archived:
+                    rheader_fields.insert(0, [(None, hint)])
 
         rheader = S3ResourceHeader(rheader_fields, tabs)(r,
                                                          table=resource.table,

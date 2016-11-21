@@ -26,6 +26,7 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
     OTHER DEALINGS IN THE SOFTWARE.
 """
+from compiler import transformer
 
 __all__ = ("S3Request",
            "S3Method",
@@ -274,7 +275,9 @@ class S3Request(object):
         set_handler("fields", self.get_fields,
                     http=("GET",), transform=True)
         set_handler("options", self.get_options,
-                    http=("GET",), transform=True)
+                    http=("GET",),
+                    representation = ("__transform__", "json"),
+                    )
 
         sync = current.sync
         set_handler("sync", sync,
@@ -1175,8 +1178,9 @@ class S3Request(object):
         """
 
         get_vars = r.get_vars
-        if "field" in get_vars:
-            items = get_vars["field"]
+
+        items = get_vars.get("field")
+        if items:
             if not isinstance(items, (list, tuple)):
                 items = [items]
             fields = []
@@ -1204,11 +1208,19 @@ class S3Request(object):
             show_uids = False
 
         representation = r.representation
+        flat = False
         if representation == "xml":
             only_last = False
             as_json = False
             content_type = "text/xml"
         elif representation == "s3json":
+            show_uids = False
+            as_json = True
+            content_type = "application/json"
+        elif representation == "json" and fields and len(fields) == 1:
+            # JSON option supported for flat data structures only
+            # e.g. for use by jquery.jeditable
+            flat = True
             show_uids = False
             as_json = True
             content_type = "application/json"
@@ -1221,7 +1233,17 @@ class S3Request(object):
                                            show_uids=show_uids,
                                            only_last=only_last,
                                            hierarchy=hierarchy,
-                                           as_json=as_json)
+                                           as_json=as_json,
+                                           )
+
+        if flat:
+            s3json = json.loads(output)
+            output = {}
+            options = s3json.get("option")
+            if options:
+                for item in options:
+                    output[item.get("@value")] = item.get("$", "")
+            output = json.dumps(output)
 
         current.response.headers["Content-Type"] = content_type
         return output

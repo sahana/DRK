@@ -72,7 +72,7 @@ class S3SchoolModel(S3Model):
         # ---------------------------------------------------------------------
         # School Types
         #
-        #org_dependent_sch_types = settings.get_edu_org_dependent_school_types()
+        #org_dependent_types = settings.get_edu_org_dependent_school_types()
 
         tablename = "edu_school_type"
         define_table(tablename,
@@ -80,9 +80,9 @@ class S3SchoolModel(S3Model):
                            label = T("Name"),
                            requires = IS_NOT_EMPTY(),
                            ),
-                     #organisation_id(default = root_org if org_dependent_sch_types else None,
-                     #                readable = is_admin if org_dependent_sch_types else False,
-                     #                writable = is_admin if org_dependent_sch_types else False,
+                     #organisation_id(default = root_org if org_dependent_types else None,
+                     #                readable = is_admin if org_dependent_types else False,
+                     #                writable = is_admin if org_dependent_types else False,
                      #                ),
                      s3_comments(),
                      *s3_meta_fields())
@@ -115,7 +115,7 @@ class S3SchoolModel(S3Model):
                                                      sort=True
                                                      )),
                                sortby = "name",
-                               comment = S3PopupLink(c = "inv",
+                               comment = S3PopupLink(c = "edu",
                                                      f = "school_type",
                                                      label = ADD_SCHOOL_TYPE,
                                                      title = T("School Type"),
@@ -184,6 +184,11 @@ class S3SchoolModel(S3Model):
                            label = T("Email"),
                            represent = lambda v: v or NONE,
                            requires = IS_EMPTY_OR(IS_EMAIL())
+                           ),
+                     Field("website",
+                           label = T("Website"),
+                           represent = lambda url: s3_url_represent(url),
+                           requires = IS_EMPTY_OR(IS_URL()),
                            ),
                      Field("obsolete", "boolean",
                            default = False,

@@ -62,7 +62,9 @@
         padding-left: 0.2rem;
         padding-right: 0;
     }
-    float: right;
+}
+.event-bottom .username {
+    padding: 0;
 }
 .overdue {
     color: red;
@@ -164,5 +166,38 @@ body.rtl {
     margin-left: 0.5rem;
     i {
         margin-right: 0.3rem;
+    }
+}
+.profile-picture {
+    margin-top: 1rem;
+    .image-row {
+        margin-bottom: 1rem;
+    }
+}
+
+// Check-in/out UI
+#site_check_in_info__row .controls {
+    width: 100%;
+}
+#site_check_in_status__row .controls {
+    padding-top: 0.3rem;
+    width: 100%;
+}
+#check-in-form {
+    .status-label {
+        font-size: 0.9rem;
+    }
+    .status-message {
+        font-size: 0.9rem;
+        font-weight: bold;
+    }
+    .person-details {
+        font-size: 1rem;
+    }
+}
+.clear-btn {
+    cursor: pointer;
+    .fa {
+        color: #B0B0B0;
     }
 }

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from gluon import current
+from gluon import current, URL
 
 from collections import OrderedDict
 
@@ -12,6 +12,7 @@ def config(settings):
     T = current.T
 
     settings.base.system_name = T("Dhandhaana - Maldives Disaster Alerting and Situational Awareness Service")
+    settings.base.system_name_short = T("NDMC")
 
     # Default Language
     settings.L10n.default_language = "dv"
@@ -27,9 +28,15 @@ def config(settings):
     settings.L10n.languages = languages
 
     # Alert Hub Title
-    settings.cap.alert_hub_title = T("Maldives Alert Hub Common Operating Picture")
+    settings.cap.alert_hub_title = T("Maldives Alert Hub Common Alerting Picture")
 
     # Maldives don't support ack workflow
     settings.cap.use_ack = False
+
+    # UI Settings
+    settings.ui.menu_logo = URL(c = "static",
+                                f = "themes",
+                                args = ["SAMBRO", "MV", "img", "ndmc.png"],
+                                )
 
 # END =========================================================================

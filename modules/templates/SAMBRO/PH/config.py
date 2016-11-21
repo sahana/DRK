@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from gluon import current
+from gluon import current, URL
 
 from collections import OrderedDict
 
@@ -12,6 +12,7 @@ def config(settings):
     T = current.T
 
     settings.base.system_name = T("Philippines Warning and Situational-Awareness System")
+    settings.base.system_name_short = T("PAGASA")
 
     # Default Language
     settings.L10n.default_language = "tl"
@@ -31,6 +32,12 @@ def config(settings):
 
     # Alert Hub Title
     # NB Alert Hub is home page for Philippines
-    settings.cap.alert_hub_title = T("PAGASA Alert Hub Common Operating Picture")
+    settings.cap.alert_hub_title = T("PAGASA Alert Hub Common Alerting Picture")
+
+    # UI Settings
+    settings.ui.menu_logo = URL(c = "static",
+                                f = "themes",
+                                args = ["SAMBRO", "PH", "img", "pagasa.png"],
+                                )
 
 # END =========================================================================

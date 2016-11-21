@@ -132,6 +132,7 @@ class S3Config(Storage):
         self.fin = Storage()
         # Allow templates to append rather than replace
         self.fin.currencies = {}
+        self.fire = Storage()
         # @ToDo: Move to self.ui
         self.frontpage = Storage()
         self.frontpage.rss = []
@@ -151,6 +152,7 @@ class S3Config(Storage):
         self.mobile = Storage()
         self.msg = Storage()
         self.org = Storage()
+        self.police = Storage()
         self.pr = Storage()
         self.proc = Storage()
         self.project = Storage()
@@ -845,6 +847,19 @@ class S3Config(Storage):
             from gluon import HTTP
             raise HTTP(501, body="Database type '%s' not recognised - please correct file models/000_config.py." % db_type)
         return db_string
+
+    def get_base_session_db(self):
+        """
+            Should we store sessions in the database to avoid locking sessions on long-running requests?
+        """
+        # @ToDo: Set this as the default when running MySQL/PostgreSQL after more testing
+        result = self.base.get("session_db", False)
+        if result:
+            (db_string, pool_size) = self.get_database_string()
+            if db_string.find("sqlite") != -1:
+                # Never store the sessions in the DB if running SQLite
+                result = False
+        return result
 
     def get_base_session_memcache(self):
         """
@@ -2056,6 +2071,12 @@ class S3Config(Storage):
         """
         return self.ui.get("report_auto_submit", 800)
 
+    def get_ui_report_timeout(self):
+        """
+            Time in milliseconds to wait for a Report's AJAX call to complete
+        """
+        return self.ui.get("report_timeout", 10000)
+
     def get_ui_use_button_icons(self):
         """
             Use icons on action buttons (requires corresponding CSS)
@@ -2857,10 +2878,34 @@ class S3Config(Storage):
 
     def get_dvr_event_registration_checkin_warning(self):
         """
-            Whether to warn during event registration when the person
-            is currently not checked-in
+            Warn during event registration when the person is currently
+            not checked-in
         """
         return self.dvr.get("event_registration_checkin_warning", False)
+
+    def get_dvr_activity_use_service_type(self):
+        """
+            Use service type in case activities
+        """
+        return self.dvr.get("activity_use_service_type", False)
+
+    def get_dvr_activity_types(self):
+        """
+            Use activity types in case activities
+        """
+        return self.dvr.get("activity_types", False)
+
+    def get_dvr_activity_types_hierarchical(self):
+        """
+            Case activity types are hierarchical
+        """
+        return self.dvr.get("activity_types_hierarchical", False)
+
+    def get_dvr_needs_hierarchical(self):
+        """
+            Need types are hierarchical
+        """
+        return self.dvr.get("needs_hierarchical", False)
 
     # -------------------------------------------------------------------------
     # Education
@@ -2881,6 +2926,17 @@ class S3Config(Storage):
             - valid options: "Disaster"
         """
         return self.event.get("label", None)
+
+    def get_event_cascade_delete_incidents(self):
+        """
+            Whether deleting an Event cascades to deleting all Incidents or whether it sets NULL
+            - 'normal' workflow is where an Event is created and within that various Incidents,
+              aso cascading the delete makes sense here ("delete everything associated with this event")
+            - WA COP uses Events to group existing Incidents, so here we don't wish to delete the Incidents if the Event is deleted
+
+            NB Changing this setting requires a DB migration
+        """
+        return self.event.get("cascade_delete_incidents", True)
 
     def get_event_exercise(self):
         """
@@ -2980,6 +3036,16 @@ class S3Config(Storage):
         """
         return self.evr.get("link_to_organisation", False)
 
+
+    # -------------------------------------------------------------------------
+    # Fire
+    #
+
+    def get_fire_station_code_unique(self):
+        """
+            Whether Fire Station code is unique
+        """
+        return self.fire.get("fire_station_unique", False)
 
     # -------------------------------------------------------------------------
     # Hospital Registry
@@ -3348,6 +3414,16 @@ class S3Config(Storage):
         """
         return self.__lazy("hrm", "training_instructors", "external")
 
+    def get_hrm_training_filter_and(self):
+        """
+            How people are filtered based on their Trainings:
+                False (default): Std options filter where we do an OR
+                    - i.e. we see all people who have done either (or both) Course A or Course B
+                True: Contains options filter (basically an AND)
+                    - i.e. we see only people who have done both Course A and Course B
+        """
+        return self.__lazy("hrm", "training_filter_and", False)
+
     def get_hrm_activity_types(self):
         """
             HRM Activity Types (for experience record),
@@ -3605,6 +3681,7 @@ class S3Config(Storage):
 
             Format for options:
                 {
+                    name = name,         ...form name (optional)
                     c = controller,      ...use this controller for form handling
                     f = function,        ...use this function for form handling
                     vars = vars,         ...add these vars to the download URL
@@ -3902,6 +3979,16 @@ class S3Config(Storage):
             Whether Organisations, Offices & Facilities should show a Tags tab
         """
         return self.org.get("tags", False)
+
+    # -------------------------------------------------------------------------
+    # Police
+    #
+
+    def get_police_station_code_unique(self):
+        """
+            Whether Police Station code is unique
+        """
+        return self.police.get("police_station_unique", False)
 
     # -------------------------------------------------------------------------
     # Persons

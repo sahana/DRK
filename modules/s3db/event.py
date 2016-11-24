@@ -1818,6 +1818,7 @@ class S3EventHRModel(S3Model):
                                        status_opts.get(opt, current.messages.UNKNOWN_OPT),
                                 requires = IS_IN_SET(status_opts),
                                 ),
+                          s3_comments(),
                           *s3_meta_fields())
 
         current.response.s3.crud_strings[tablename] = Storage(
@@ -1973,11 +1974,39 @@ class S3EventTeamModel(S3Model):
                   deduplicate = S3Duplicate(primary=("incident_id",
                                                      "group_id",
                                                      )),
+                  onaccept = self.event_team_onaccept,
                   )
 
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         return {}
+
+    #--------------------------------------------------------------------------    
+    @staticmethod
+    def event_team_onaccept(form):
+        """
+            Set the event_id from the incident_id
+        """
+
+        form_vars = form.vars
+        event_id = form_vars.get("event_id")
+        incident_id = form_vars.get("incident_id")
+        if incident_id and not event_id:
+            db = current.db
+            s3db = current.s3db
+            itable = s3db.event_incident
+            incident = db(itable.id == incident_id).select(itable.event_id,
+                                                           limitby=(0, 1)
+                                                           ).first()
+            try:
+                event_id = incident.event_id
+            except:
+                # Nothing we can do if Incident is invalid
+                pass
+            else:
+                if not event_id:
+                    return
+                db(s3db.event_team.id == form_vars.get("id")).update(event_id = event_id)
 
 # =============================================================================
 class S3EventImpactModel(S3Model):
@@ -2193,6 +2222,7 @@ class S3EventOrganisationModel(S3Model):
                                 requires = IS_IN_SET(status_opts),
                                 ),
                           # @ToDo: Role?
+                          s3_comments(),
                           *s3_meta_fields())
 
         current.response.s3.crud_strings[tablename] = Storage(

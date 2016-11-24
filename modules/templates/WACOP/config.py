@@ -221,6 +221,12 @@ def config(settings):
     ])
 
     # -------------------------------------------------------------------------
+    # CMS Content Management
+    #
+    settings.cms.bookmarks = True
+    settings.cms.show_tags = True
+
+    # -------------------------------------------------------------------------
     # Event/Incident Management
     #
     settings.event.incident_teams_tab = "Units"
@@ -261,34 +267,134 @@ def config(settings):
     def customise_event_incident_controller(**attr):
 
         s3db = current.s3db
+        s3 = current.response.s3
 
         # Load normal model to be able to override configuration
-        s3db.event_incident
+        table = s3db.event_incident
+
+        def status_represent(value):
+            " Represent the closed field as a Status Open/Closed instead of True/False "
+
+            if value is True:
+                return T("Closed")
+            elif value is False:
+                return T("Open")
+            else:
+                return current.messages["NONE"]
+
+        table.closed.label = T("Status")
+        table.closed.represent = status_represent
 
         # Custom Profile
         s3db.set_method("event", "incident",
                         method = "custom",
                         action = incident_Profile)
 
-        list_fields = ["date",
+        s3.crud_strings["event_incident"].title_list =  T("Browse Incidents")
+
+        from s3 import S3OptionsFilter, S3TextFilter
+        filter_widgets = [S3TextFilter(["name",
+                                        "comments",
+                                        ],
+                                       formstyle = text_filter_formstyle,
+                                       label = T("Search"),
+                                       _placeholder = T("Enter search term…"),
+                                       ),
+                          S3OptionsFilter("organisation_id",
+                                          label = "",
+                                          noneSelectedText = "Lead Organization",
+                                          widget = "multiselect",
+                                          ),
+                          S3OptionsFilter("closed",
+                                          formstyle = filter_formstyle,
+                                          options = {"*": T("All"),
+                                                     False: T("Open"),
+                                                     True: T("Closed"),
+                                                     },
+                                          cols = 1,
+                                          multiple = False,
+                                          ),
+                          S3OptionsFilter("incident_type_id",
+                                          formstyle = filter_formstyle,
+                                          label = T("Incident Type"),
+                                          noneSelectedText = "All",
+                                          widget = "multiselect",
+                                          ),
+                          ]
+
+        list_fields = ["closed",
                        "name",
-                       "incident_type_id",
-                       "event_id",
-                       "closed",
-                       "comments",
+                       (T("Type"), "incident_type_id"),
+                       "location_id",
+                       (T("Start"), "date"),
+                       (T("End"), "end_date"),
                        ]
 
         s3db.configure("event_incident",
+                       filter_widgets = filter_widgets,
                        list_fields = list_fields,
                        )
+
+        # Custom postp
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+            # Call standard postp
+            if callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if r.interactive and isinstance(output, dict):
+                # Open the Custom profile page instead of the normal one
+                from gluon import URL
+                from s3 import S3CRUD
+                custom_url = URL(args = ["[id]", "custom"])
+                S3CRUD.action_buttons(r,
+                                      read_url=custom_url,
+                                      update_url=custom_url)
+                # Additional styles
+                s3.external_stylesheets += ["https://cdn.knightlab.com/libs/timeline3/latest/css/timeline.css",
+                                            "https://fonts.googleapis.com/css?family=Merriweather:400,700|Source+Sans+Pro:400,700",
+                                            ]
+
+            return output
+        s3.postp = custom_postp
 
         # Custom rheader tabs
         attr = dict(attr)
         attr["rheader"] = wacop_event_rheader
 
+        # Display events in the header
+        etable = s3db.event_event
+        query = (etable.closed == False) & \
+                (etable.deleted == False)
+        events = current.db(query).select(etable.id, etable.name)
+        attr["events"] = events
+
+        # No sidebar menu
+        current.menu.options = None
+
         return attr
 
     settings.customise_event_incident_controller = customise_event_incident_controller
+
+    # -------------------------------------------------------------------------
+    def customise_event_team_resource(r, tablename):
+        # @ToDo: Have both Team & Event_Team in 1 form
+
+        s3db = current.s3db
+
+        #s3db.event_team.group_id.label = T("Resource")
+
+        from s3 import S3SQLCustomForm
+        crud_form = S3SQLCustomForm("incident_id",
+                                    "group_id",
+                                    "status_id",
+                                    )
+
+        s3db.configure(tablename,
+                       crud_form = crud_form,
+                       )
+
+    settings.customise_event_team_resource = customise_event_team_resource
 
     # -------------------------------------------------------------------------
     def customise_pr_group_resource(r, tablename):
@@ -411,13 +517,37 @@ class incident_Profile(S3CRUD):
         if incident_id and \
            r.name == "incident" and \
            not r.component:
+
+            s3db = current.s3db
+            ptable = s3db.cms_post
+
+            if r.http == "POST":
+                # Process the Updates form
+                from gluon import SQLFORM
+                form = SQLFORM(ptable)
+                #onvalidation = 
+                if form.accepts(r.post_vars,
+                                current.session,
+                                #onvalidation=onvalidation
+                                ):
+                    # Insert new record
+                    accept_id = ptable.insert(**data)
+                    # @ToDo: onaccept / record ownership / audit if-required
+                    # @ToDo:
+                    #s3db.update_super()
+
+                    #response.confirmation = message
+
+                    if form.errors:
+                        # Revert any records created within widgets/validators
+                        current.db.rollback()
+
             representation = r.representation
             if representation == "html":
 
                 T = current.T
                 db = current.db
-                s3db = current.s3db
-                request = self.request
+                auth = current.auth
                 response = current.response
                 s3 = response.s3
 
@@ -425,13 +555,12 @@ class incident_Profile(S3CRUD):
                 itable = s3db.event_incident
                 #rtable = s3db.pr_group
                 ertable = s3db.event_team
-                #ptable = s3db.cms_post
                 eptable = s3db.event_post
 
                 record = r.record
 
-                from gluon import DIV
-                from s3 import FS, S3DateTime, s3_str
+                from gluon import A, DIV, I, TAG, URL
+                from s3 import FS, S3DateTime, S3FilterForm, S3DateFilter, S3OptionsFilter, S3TextFilter
 
                 date_represent = lambda dt: S3DateTime.date_represent(dt,
                                                                       format = "%b %d %Y %H:%M",
@@ -536,20 +665,20 @@ class incident_Profile(S3CRUD):
                     output["lon_max"] = ""
                     output["lon_min"] = ""
 
-                # Resources dataTable
-                tablename = "event_team"
-                resource = s3db.resource(tablename)
-                resource.add_filter(FS("incident_id") == incident_id)
+                messages = current.messages
+                permit = auth.s3_has_permission
+                updateable = permit("update", itable, record_id=incident_id, c="event", f="incident")
 
-                list_id = "custom-list-%s" % tablename
+                settings = current.deployment_settings
+                # Uncomment to control the dataTables layout: https://datatables.net/reference/option/dom
+                #settings.ui.datatables_dom = "<'data-info row'<'large-4 columns'i><'large-3 columns'l><'large-3 columns search'f><'large-2 columns right'>r><'dataTable_table't><'row'p>"
+                # Uncomment for dataTables to use a different paging style:
+                settings.ui.datatables_pagingType = "bootstrap"
+                dt_init = ['''$('.dataTables_filter label,.dataTables_length,.dataTables_info').hide();''']
 
-                get_vars = request.get_vars.get
-                #if representation == "aadata":
-                #    start = get_vars("displayStart", None)
-                #    limit = get_vars("pageLength", 0)
-                #else:
-                start = get_vars("start", None)
-                limit = get_vars("limit", 0)
+                get_vars = r.get_vars
+                start = get_vars.get("start", None)
+                limit = get_vars.get("limit", 0)
                 if limit:
                     if limit.lower() == "none":
                         limit = None
@@ -564,22 +693,11 @@ class incident_Profile(S3CRUD):
                     # Use defaults
                     start = None
 
-                dtargs = attr.get("dtargs", {})
-
                 # How many records per page?
                 if s3.dataTable_pageLength:
                     display_length = s3.dataTable_pageLength
                 else:
                     display_length = 10
-                dtargs["dt_lengthMenu"] = [[10, 25, 50, -1],
-                                           [10, 25, 50, s3_str(T("All"))]
-                                           ]
-
-                list_fields = ["group_id",
-                               "status_id",
-                               ]
-
-                orderby = "pr_group.name"
 
                 # Server-side pagination?
                 if not s3.no_sspag:
@@ -591,117 +709,704 @@ class incident_Profile(S3CRUD):
                 else:
                     dt_pagination = "false"
 
-                # Get the data table
-                dt, totalrows, ids = resource.datatable(fields=list_fields,
-                                                        start=start,
-                                                        limit=limit,
-                                                        orderby=orderby)
-                displayrows = totalrows
-
-                if dt.empty:
-                    empty_str = self.crud_string(tablename,
-                                                 "msg_list_empty")
-                else:
-                    empty_str = self.crud_string(tablename,
-                                                 "msg_no_match")
-                empty = DIV(empty_str, _class="empty")
-
-                dtargs["dt_pagination"] = dt_pagination
-                dtargs["dt_pageLength"] = display_length
-                # @todo: fix base URL (make configurable?) to fix export options
                 s3.no_formats = True
-                dtargs["dt_base_url"] = r.url(method="", vars={})
-                dtargs["dt_ajax_url"] = r.url(#vars={"update": 0}, # If we need to update multiple dataTables
-                                              representation="aadata")
 
-                datatable = dt.html(totalrows,
-                                    displayrows,
-                                    id=list_id,
-                                    **dtargs)
+                def _datatable(tablename, list_fields, orderby):
 
-                if dt.data:
-                    empty.update(_style="display:none")
+                    c, f = tablename.split("_", 1)
+
+                    resource = s3db.resource(tablename)
+                    resource.add_filter(FS("event_%s.incident_id" % f) == incident_id)
+
+                    list_id = "custom-list-%s" % tablename
+
+                    # Update the datatables init
+                    dt_init.append('''$('#dt-%(tablename)s .dataTables_filter').prependTo($('#dt-search-%(tablename)s'));$('#dt-search-%(tablename)s .dataTables_filter input').attr('placeholder','Enter search term…').attr('name','%(tablename)s-search').prependTo($('#dt-search-%(tablename)s .dataTables_filter'));$('.custom-list-%(tablename)s_length').hide();''' % \
+                        dict(tablename = tablename))
+
+                    # Move the search boxes into the design
+                    settings.ui.datatables_initComplete = "".join(dt_init)
+
+                    # Get the data table
+                    dt, totalrows, ids = resource.datatable(fields=list_fields,
+                                                            start=start,
+                                                            limit=limit,
+                                                            orderby=orderby)
+                    displayrows = totalrows
+
+                    if dt.empty:
+                        empty_str = self.crud_string(tablename,
+                                                     "msg_list_empty")
+                    else:
+                        empty_str = self.crud_string(tablename,
+                                                     "msg_no_match")
+                    empty = DIV(empty_str, _class="empty")
+
+                    dtargs = attr.get("dtargs", {})
+
+                    # @ToDo: Permissions
+                    dtargs["dt_row_actions"] = [{"label": messages.READ,
+                                                 "url": URL(c="event", f="incident",
+                                                            args=[incident_id, f, "[id].popup"]),
+                                                 "icon": "fa fa-eye",
+                                                 "_class": "s3_modal",
+                                                 },
+                                                # @ToDo: AJAX delete
+                                                {"label": messages.DELETE,
+                                                 "url": URL(c="event", f="incident",
+                                                            args=[incident_id, f, "[id]", "delete"]),
+                                                 "icon": "fa fa-trash",
+                                                 },
+                                                ]
+                    dtargs["dt_action_col"] = len(list_fields)
+                    dtargs["dt_pagination"] = dt_pagination
+                    dtargs["dt_pageLength"] = display_length
+                    dtargs["dt_base_url"] = r.url(method="", vars={})
+                    dtargs["dt_ajax_url"] = r.url(vars={"update": tablename},
+                                                  representation="aadata")
+
+                    datatable = dt.html(totalrows,
+                                        displayrows,
+                                        id=list_id,
+                                        **dtargs)
+
+                    if dt.data:
+                        empty.update(_style="display:none")
+                    else:
+                        datatable.update(_style="display:none")
+                    contents = DIV(datatable, empty, _class="dt-contents")
+
+                    # Link for create-popup
+                    if updateable and permit("create", tablename):
+                        output["create_%s_popup" % tablename] = \
+                            A(TAG[""](I(_class="fa fa-plus"),
+                                      T("Add"),
+                                      ),
+                              _href = URL(c="event", f="incident",
+                                          args=[incident_id, f, "create.popup"],
+                                          vars={"refresh": list_id},
+                                          ),
+                              _class = "button tiny postfix s3_modal", 
+                              )
+                    else:
+                        output["create_%s_popup" % tablename] = ""
+
+                    # Render the widget
+                    output["%s_datatable" % tablename] = DIV(contents,
+                                                             _class="card-holder",
+                                                             )
+
+                # Resources dataTable
+                tablename = "event_team"
+                list_fields = ["id", #(T("Actions"), "id"), @ToDo: Label
+                               "group_id",
+                               "status_id",
+                               ]
+                orderby = "pr_group.name"
+                _datatable(tablename, list_fields, orderby)
+
+                # Tasks dataTable
+                tablename = "project_task"
+                list_fields = ["status",
+                               (T("Description"), "name"),
+                               (T("Created"), "created_on"),
+                               (T("Due"), "date_due"),
+                               ]
+                orderby = "project_task.date_due"
+                _datatable(tablename, list_fields, orderby)
+
+                # Staff dataTable
+                tablename = "event_human_resource"
+                list_fields = [(T("Name"), "human_resource_id"),
+                               (T("Title"), "human_resource_id$job_title_id"),
+                               "human_resource_id$organisation_id",
+                                (T("Email"), "human_resource_id$person_id$email.value"),
+                                (T("Phone"), "human_resource_id$person_id$phone.value"),
+                               "status",
+                               (T("Notes"), "comments"),
+                               ]
+                orderby = "event_human_resource.human_resource_id"
+                _datatable(tablename, list_fields, orderby)
+
+                # Organisations dataTable
+                tablename = "event_organisation"
+                list_fields = [(T("Name"), "organisation_id"),
+                               "status",
+                               "comments",
+                               ]
+                orderby = "event_organisation.organisation_id"
+                _datatable(tablename, list_fields, orderby)
+
+                # Updates DataList
+                tablename = "cms_post"
+                c, f = tablename.split("_", 1)
+                resource = s3db.resource(tablename)
+                resource.add_filter(FS("event_%s.incident_id" % f) == incident_id)
+
+                list_fields = ["series_id",
+                               "date",
+                               "body",
+                               "created_by",
+                               "tag_post.tag_id",
+                               ]
+                datalist, numrows, ids = resource.datalist(fields=list_fields,
+                                                           start=None,
+                                                           limit=5,
+                                                           list_id="updates_datalist",
+                                                           orderby="date desc",
+                                                           layout=cms_post_list_layout)
+                if numrows == 0:
+                    # Empty table or just no match?
+                    if "deleted" in ptable:
+                        available_records = db(ptable.deleted != True)
+                    else:
+                        available_records = db(ptable._id > 0)
+                    if available_records.select(ptable._id,
+                                                limitby=(0, 1)).first():
+                        msg = DIV(self.crud_string(tablename,
+                                                   "msg_no_match"),
+                                  _class="empty")
+                    else:
+                        msg = DIV(self.crud_string(tablename,
+                                                   "msg_list_empty"),
+                                  _class="empty")
+                    data = msg
                 else:
-                    datatable.update(_style="display:none")
-                contents = DIV(datatable, empty, _class="dt-contents")
-
-                # Link for create-popup
-                #create_popup = self._create_popup(r,
-                #                                  widget,
-                #                                  list_id,
-                #                                  resource,
-                #                                  context,
-                #                                  totalrows)
+                    # Render the list
+                    data = datalist.html()
 
                 # Render the widget
-                output["resources"] = DIV(contents,
-                                          _class="card-holder",
-                                          )
+                output["updates_datalist"] = data
+
+                # Filter Form
+                date_filter = S3DateFilter("date",
+                                           label = "",
+                                           #hide_time = True,
+                                           )
+                date_filter.input_labels = {"ge": "Start Time/Date", "le": "End Time/Date"}
+
+                filter_widgets = [S3TextFilter(["body",
+                                                ],
+                                               formstyle = text_filter_formstyle,
+                                               label = T("Search"),
+                                               _placeholder = T("Enter search term…"),
+                                               ),
+                                  S3OptionsFilter("bookmark.user_id",
+                                                  label = "",
+                                                  options = {"*": T("All"),
+                                                             auth.user.id: T("My Bookmarks"),
+                                                             },
+                                                  cols = 2,
+                                                  multiple = False,
+                                                  ),
+                                  S3OptionsFilter("series_id",
+                                                  label = "",
+                                                  noneSelectedText = "Type",
+                                                  widget = "multiselect",
+                                                  ),
+                                  S3OptionsFilter("created_by$organisation_id",
+                                                  label = "",
+                                                  noneSelectedText = "Source",
+                                                  ),
+                                  S3OptionsFilter("tag_post.tag_id",
+                                                  label = "",
+                                                  noneSelectedText = "Tag",
+                                                  ),
+                                  date_filter,
+                                  ]
+
+                filter_form = S3FilterForm(filter_widgets)
+                output["filter_form"] = filter_form.html(resource, get_vars,
+                                                         target="updates_datalist",
+                                                         alias=None)
+                # @ToDo: Move to static or apply styles in theme
+                s3.jquery_ready.append('''$('.filter-clear, .show-filter-manager').addClass('button tiny secondary')''')
+
+                #  Create Form
+                if updateable and permit("create", tablename):
+                    #from gluon import SQLFORM
+                    from gluon.html import FORM, LABEL, TEXTAREA, SELECT, OPTION, INPUT, HR
+
+                    stable = db.cms_series
+                    series = db(stable.deleted == False).select(stable.name,
+                                                                stable.id,
+                                                                )
+                    select = SELECT(OPTION("Choose an update type…",
+                                           _disabled=True,
+                                           ),
+                                    _id="cms_post_series_id",
+                                    _name="series_id",
+                                    )
+                    for s in series:
+                        # @ToDo: Option for T()
+                        select.append(OPTION(s.name,
+                                             _value=s.id,
+                                             ))
+
+                    #form = SQLFORM(table)
+                    #hidden_fields = form.hidden_fields()
+                    #custom = form.custom
+                    #widgets = custom.widget
+                    form = FORM(LABEL("Write new Update Post:",
+                                      _for="body",
+                                      ),
+                                TEXTAREA(_id="cms_post_body",
+                                         _name="body",
+                                         _placeholder="Write something…",
+                                         _rows="4",
+                                         ),
+                                DIV(DIV(select,
+                                        _class="large-4 columns",
+                                        ),
+                                    DIV(INPUT(_type="text",
+                                              _name="tag",
+                                              _value="",
+                                              _placeholder="Add tags here…",
+                                              ),
+                                        _class="large-3 columns",
+                                        ),
+                                    DIV(INPUT(_type="submit",
+                                              _class="button tiny default right",
+                                              _value="Post Update",
+                                              ),
+                                        _class="large-5 columns",
+                                        ),
+                                    _class="row",
+                                    ),
+                                #hidden_fields, # Only needed for updates
+                                _class="form",
+                                action="#",
+                                enctype="multipart/form-data",
+                                method="post",
+                                )
+
+                    form_div = DIV(form,
+                                   _class="compose-update panel",
+                                   )
+                    output["create_post_form"] = form_div
+                else:
+                    output["create_post_form"] = ""
 
                 import os
-                response.view = os.path.join(request.folder,
+                response.view = os.path.join(r.folder,
                                              "modules", "templates",
                                              "WACOP", "views",
                                              "incident_profile.html")
+                # Done for the whole controller
+                #current.menu.options = None
                 return output
 
-        elif representation == "aadata":
+            elif representation == "aadata":
+                # DataTables updates
+    
+                get_vars = r.get_vars
+                tablename = get_vars.get("update")
+                c, f = tablename.split("_", 1)
 
-            # Resources dataTable
-            # @ToDo: Complete
+                if tablename == "event_team":
+                    list_fields = ["group_id",
+                                   "status_id",
+                                   ]
+                    orderby = "pr_group.name"
 
-            # Parse datatable filter/sort query
-            searchq, orderby, left = resource.datatable_filter(list_fields,
-                                                               get_vars)
+                elif tablename == "project_task":
+                    list_fields = ["status",
+                                   "name",
+                                   "created_on",
+                                   "date_due",
+                                   ]
+                    orderby = "project_task.date_due"
+    
+                elif tablename == "event_human_resource":
+                    list_fields = ["human_resource_id",
+                                   "human_resource_id$job_title_id",
+                                   "human_resource_id$organisation_id",
+                                   "human_resource_id$person_id$email.value",
+                                   "human_resource_id$person_id$phone.value",
+                                   "status",
+                                   "comments",
+                                   ]
+                    orderby = "event_human_resource.human_resource_id"
 
-            # ORDERBY fallbacks - datatable->widget->resource->default
-            if not orderby:
-                orderby = widget.get("orderby")
-            if not orderby:
-                orderby = resource.get_config("orderby")
-            if not orderby:
-                orderby = default_orderby()
+                elif tablename == "event_organisation":
+                    list_fields = ["organisation_id",
+                                   "status",
+                                   "comments",
+                                   ]
+                    orderby = "event_organisation.organisation_id"
 
-            # DataTable filtering
-            if searchq is not None:
-                totalrows = resource.count()
-                resource.add_filter(searchq)
-            else:
-                totalrows = None
+                else:
+                    raise HTTP(405, current.ERROR.BAD_METHOD)
 
-            # Get the data table
-            if totalrows != 0:
-                dt, displayrows, ids = resource.datatable(fields=list_fields,
-                                                          start=start,
-                                                          limit=limit,
-                                                          left=left,
-                                                          orderby=orderby,
-                                                          getids=False)
-            else:
-                dt, displayrows = None, 0
+                from s3 import FS
+    
+                response = current.response
+                s3 = response.s3
+                
+                resource = current.s3db.resource(tablename)
+                resource.add_filter(FS("event_%s.incident_id" % f) == incident_id)
+    
+                list_id = "custom-list-%s" % tablename
 
-            if totalrows is None:
-                totalrows = displayrows
+                # Parse datatable filter/sort query
+                searchq, orderby_not, left = resource.datatable_filter(list_fields,
+                                                                       get_vars)
+    
+                # DataTable filtering
+                if searchq is not None:
+                    totalrows = resource.count()
+                    resource.add_filter(searchq)
+                else:
+                    totalrows = None
+    
+                # Get the data table
+                if totalrows != 0:
+                    start = get_vars.get("displayStart", None)
+                    limit = get_vars.get("pageLength", 0)
+                    dt, displayrows, ids = resource.datatable(fields=list_fields,
+                                                              start=start,
+                                                              limit=limit,
+                                                              left=left,
+                                                              orderby=orderby,
+                                                              getids=False)
+                else:
+                    dt, displayrows, limit = None, 0, 0
+    
+                if totalrows is None:
+                    totalrows = displayrows
+    
+                # Echo
+                draw = int(get_vars.get("draw") or 0)
+    
+                # How many records per page?
+                if s3.dataTable_pageLength:
+                    display_length = s3.dataTable_pageLength
+                else:
+                    display_length = 10
 
-            # Echo
-            draw = int(get_vars.get("draw") or 0)
+                # Server-side pagination?
+                if not s3.no_sspag:
+                    dt_pagination = "true"
+                    if not limit and display_length is not None:
+                        limit = 2 * display_length
+                    else:
+                        limit = None
+                else:
+                    dt_pagination = "false"
 
-            # Representation
-            if dt is not None:
-                data = dt.json(totalrows,
-                               displayrows,
-                               list_id,
-                               draw,
-                               **dtargs)
-            else:
-                data = '{"recordsTotal":%s,' \
-                       '"recordsFiltered":0,' \
-                       '"dataTable_id":"%s",' \
-                       '"draw":%s,' \
-                       '"data":[]}' % (totalrows, list_id, draw)
+                dtargs = attr.get("dtargs", {})
+                dtargs["dt_action_col"] = len(list_fields)
+                dtargs["dt_pagination"] = dt_pagination
+                dtargs["dt_pageLength"] = display_length
+                #dtargs["dt_base_url"] = r.url(method="", vars={})
+                #dtargs["dt_ajax_url"] = r.url(#vars={"update": 0}, # If we need to update multiple dataTables
+                #                              representation="aadata")
 
-            return data
+                # Representation
+                if dt is not None:
+                    data = dt.json(totalrows,
+                                   displayrows,
+                                   list_id,
+                                   draw,
+                                   **dtargs)
+                else:
+                    data = '{"recordsTotal":%s,' \
+                           '"recordsFiltered":0,' \
+                           '"dataTable_id":"%s",' \
+                           '"draw":%s,' \
+                           '"data":[]}' % (totalrows, list_id, draw)
+    
+                response.headers["Content-Type"] = "application/json"
+                return data
+
+            elif representation == "dl":
+                # DataList updates
+                # @ToDo
+                pass
 
         raise HTTP(405, current.ERROR.BAD_METHOD)
+
+# =============================================================================
+def cms_post_list_layout(list_id, item_id, resource, rfields, record):
+    """
+        dataList item renderer for Updates on the Incident Profile page.
+
+        @param list_id: the HTML ID of the list
+        @param item_id: the HTML ID of the item
+        @param resource: the S3Resource to render
+        @param rfields: the S3ResourceFields to render
+        @param record: the record as dict
+    """
+
+    from gluon.html import A, DIV, I, LI, P, SPAN, TAG, UL, URL
+    from s3 import ICON
+
+    record_id = record["cms_post.id"]
+    item_class = "thumbnail"
+
+    T = current.T
+    db = current.db
+    s3db = current.s3db
+    settings = current.deployment_settings
+    permit = current.auth.s3_has_permission
+
+    raw = record._row
+    date = record["cms_post.date"]
+    body = record["cms_post.body"]
+    series_id = raw["cms_post.series_id"]
+
+    # Allow records to be truncated
+    # (not yet working for HTML)
+    body = DIV(body,
+               _class="s3-truncate",
+               )
+
+    if series_id:
+        series = record["cms_post.series_id"]
+        translate = settings.get_L10n_translate_cms_series()
+        if translate:
+            series_title = T(series)
+        else:
+            series_title = series
+    else:
+        series_title = series = ""
+
+    author_id = raw["cms_post.created_by"]
+    person = record["cms_post.created_by"]
+
+    # @ToDo: Bulk lookup
+    ltable = s3db.pr_person_user
+    ptable = db.pr_person
+    query = (ltable.user_id == author_id) & \
+            (ltable.pe_id == ptable.pe_id)
+    row = db(query).select(ptable.id,
+                           limitby=(0, 1)
+                           ).first()
+    if row:
+        person_id = row.id
+    else:
+        person_id = None
+
+    if person:
+        if person_id:
+            # @ToDo: deployment_setting for controller to use?
+            person_url = URL(c="hrm", f="person", args=[person_id])
+        else:
+            person_url = "#"
+        person = A(person,
+                   _href=person_url,
+                   )
+
+    table = db.cms_post
+    updateable = permit("update", table, record_id=record_id)
+
+    # Toolbar
+    if updateable:
+        edit_btn = A(ICON("edit"),
+                     SPAN("edit",
+                          _class = "show-for-sr",
+                          ),
+                     _href=URL(c="cms", f="post",
+                               args=[record_id, "update.popup"],
+                               vars={"refresh": list_id,
+                                     "record": record_id}
+                               ),
+                     _class="s3_modal",
+                     _title=T("Edit %(type)s") % dict(type=series_title),
+                     )
+    else:
+        edit_btn = ""
+    if permit("delete", table, record_id=record_id):
+        delete_btn = A(ICON("delete"),
+                       SPAN("delete",
+                           _class = "show-for-sr",
+                           ),
+                      _class="dl-item-delete",
+                      _title=T("Delete"),
+                      )
+    else:
+        delete_btn = ""
+
+    user = current.auth.user
+    if user and settings.get_cms_bookmarks():
+        ltable = s3db.cms_post_user
+        query = (ltable.post_id == record_id) & \
+                (ltable.user_id == user.id)
+        exists = db(query).select(ltable.id,
+                                  limitby=(0, 1)
+                                  ).first()
+        if exists:
+            bookmark_btn = A(ICON("bookmark"),
+                             SPAN("remove bookmark",
+                                  _class = "show-for-sr",
+                                  ),
+                             _onclick="$.getS3('%s',function(){$('#%s').datalist('ajaxReloadItem',%s)})" %
+                                (URL(c="cms", f="post",
+                                     args=[record_id, "remove_bookmark"]),
+                                 list_id,
+                                 record_id),
+                             _title=T("Remove Bookmark"),
+                             )
+        else:
+            bookmark_btn = A(ICON("bookmark-empty"),
+                             SPAN("bookmark",
+                                  _class = "show-for-sr",
+                                  ),
+                             _onclick="$.getS3('%s',function(){$('#%s').datalist('ajaxReloadItem',%s)})" %
+                                (URL(c="cms", f="post",
+                                     args=[record_id, "add_bookmark"]),
+                                 list_id,
+                                 record_id),
+                             _title=T("Add Bookmark"),
+                             )
+    else:
+        bookmark_btn = ""
+
+    divider = LI("|")
+    divider["_aria-hidden"] = "true"
+
+    toolbar = UL(LI(A(ICON("share"),
+                      " Share",
+                      _href="#",
+                      _class="button secondary tiny",
+                      ),
+                    _class="item",
+                    ),
+                 LI(A(ICON("flag"), # @ToDo: Use flag-lat if not flagged & flag if already flagged (like for bookmarks)
+                      SPAN("flag this",
+                           _class = "show-for-sr",
+                           ),
+                      _href="#",
+                      _title=T("Flag"),
+                      ),
+                    _class="item",
+                    ),
+                 LI(bookmark_btn,
+                    _class="item",
+                    ),
+                 divider,
+                 LI(A(I(_class="fa fa-users",
+                        ),
+                      SPAN("make public",
+                           _class = "show-for-sr",
+                           ),
+                      _href="#",
+                      _title=T("Make Public"),
+                      ),
+                    _class="item",
+                    ),
+                 LI(edit_btn,
+                    _class="item",
+                    ),
+                 LI(delete_btn,
+                    _class="item",
+                    ),
+                 _class="inline-list right",
+                 )
+
+    #if settings.get_cms_show_tags():
+    tag_list = UL(_class="left inline-list s3-tags",
+                  )
+    tag_list["_data-post_id"] = record_id
+    tags = raw["cms_tag.name"]
+    if tags:
+        if not isinstance(tags, list):
+            tags = [tags]
+        for tag in tags:
+            tag_list.append(LI(A(tag,
+                                 _href="#",
+                                 ),
+                               ))
+
+    item = LI(TAG["HEADER"](P(SPAN(series_title,
+                                   _class="label info",
+                                   ),
+                              TAG["TIME"](date),
+                              " by %s" % person,
+                              _class="left update-meta-text",
+                              ),
+                            toolbar,
+                            _class="clearfix",
+                            ),
+              P(body),
+              TAG["FOOTER"](SPAN("Tags:",
+                                 _class="left",
+                                 ),
+                            tag_list,
+                            P(A("0 Comments",
+                                _href="#update-1-comments",
+                                ),
+                              _class="right",
+                              ),
+                            _class="clearfix",
+                            ),
+              _class="panel",
+              _id=item_id,
+              )
+
+    return item
+
+# =============================================================================
+def text_filter_formstyle(form, fields, *args, **kwargs):
+    """
+        Custom formstyle for S3TextFilter
+    """
+
+    from gluon.html import DIV, LABEL, TAG
+
+    def render_row(row_id, label, widget, comment, hidden=False):
+
+        controls = DIV(DIV(LABEL("Search:",
+                                 _class="prefix",
+                                 ),
+                           _class="large-4 columns",
+                           _for=widget[1].attributes["_name"],
+                           ),
+                       DIV(widget,
+                           _class="large-8 columns",
+                           ),
+                       _class="row collapse prefix-radius",
+                       _id=row_id,
+                       )
+        return controls
+
+    if args:
+        row_id = form
+        label = fields
+        widget, comment = args
+        hidden = kwargs.get("hidden", False)
+        return render_row(row_id, label, widget, comment, hidden)
+    else:
+        parent = TAG[""]()
+        for row_id, label, widget, comment in fields:
+            parent.append(render_row(row_id, label, widget, comment))
+        return parent
+
+# =============================================================================
+def filter_formstyle(form, fields, *args, **kwargs):
+    """
+        Custom formstyle for filters on the Incident Summary page
+    """
+
+    from gluon.html import DIV, FIELDSET, LEGEND
+
+    def render_row(row_id, label, widget, comment, hidden=False):
+
+        controls = FIELDSET(LEGEND(label),
+                            widget,
+                            )
+        return DIV(controls, _id=row_id)
+
+    if args:
+        row_id = form
+        label = fields
+        widget, comment = args
+        hidden = kwargs.get("hidden", False)
+        return render_row(row_id, label, widget, comment, hidden)
+    else:
+        parent = TAG[""]()
+        for row_id, label, widget, comment in fields:
+            parent.append(render_row(row_id, label, widget, comment))
+        return parent
 
 # END =========================================================================

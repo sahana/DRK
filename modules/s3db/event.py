@@ -36,6 +36,7 @@ __all__ = ("S3EventModel",
            "S3EventActivityModel",
            "S3EventAlertModel",
            "S3EventAssetModel",
+           "S3EventBookmarkModel",
            "S3EventCMSModel",
            "S3EventDCModel",
            "S3EventHRModel",
@@ -48,9 +49,11 @@ __all__ = ("S3EventModel",
            "S3EventResourceModel",
            "S3EventSiteModel",
            "S3EventSitRepModel",
+           "S3EventTagModel",
            "S3EventTaskModel",
            "S3EventShelterModel",
            "event_notification_dispatcher",
+           "event_event_list_layout",
            "event_incident_list_layout",
            "event_rheader",
            )
@@ -214,6 +217,12 @@ class S3EventModel(S3Model):
                            requires = IS_NOT_EMPTY(),
                            ),
                      event_type_id(),
+                     #Field("intensity",
+                     #      label = T("Intensity"),
+                     #      comment = DIV(_class="tooltip",
+                     #                    _title="%s|%s" % (T("Intensity"),
+                     #                                      T("e.g. Category for a Typhoon or Magnitude for an Earthquake"))),
+                     #      ),
                      self.org_organisation_id(
                         comment = DIV(_class="tooltip",
                                        _title="%s|%s" % (T("Organization"),
@@ -414,6 +423,7 @@ class S3EventModel(S3Model):
                   extra_fields = ["start_date"],
                   filter_widgets = filter_widgets,
                   list_fields = list_fields,
+                  list_layout = event_event_list_layout,
                   list_orderby = "event_event.start_date desc",
                   orderby = "event_event.start_date desc",
                   report_options = report_options,
@@ -825,6 +835,23 @@ class S3IncidentModel(S3Model):
                                             },
                             )
 
+        # Custom Methods
+        set_method("event", "incident",
+                   method = "add_tag",
+                   action = self.incident_add_tag)
+
+        set_method("event", "incident",
+                   method = "remove_tag",
+                   action = self.incident_remove_tag)
+
+        set_method("event", "incident",
+                   method = "add_bookmark",
+                   action = self.incident_add_bookmark)
+
+        set_method("event", "incident",
+                   method = "remove_bookmark",
+                   action = self.incident_remove_bookmark)
+
         # Custom Method to Assign HRs
         set_method("event", "incident",
                    method = "assign",
@@ -987,6 +1014,179 @@ class S3IncidentModel(S3Model):
             rows = db(ltable.incident_id == incident).select(ltable.post_id)
             for row in rows:
                 db(table.id == row.post_id).update(expired=True)
+
+    # -----------------------------------------------------------------------------
+    @staticmethod
+    def incident_add_tag(r, **attr):
+        """
+            Add a Tag to an Incident
+
+            S3Method for interactive requests
+            - designed to be called as an afterTagAdded callback to tag-it.js
+        """
+
+        incident_id = r.id
+        if not incident_id or len(r.args) < 3:
+            raise HTTP(405, current.ERROR.BAD_METHOD)
+
+        tag = r.args[2]
+        db = current.db
+        s3db = current.s3db
+        ttable = s3db.cms_tag
+        ltable = s3db.event_tag
+        exists = db(ttable.name == tag).select(ttable.id,
+                                               ttable.deleted,
+                                               ttable.deleted_fk,
+                                               limitby=(0, 1)
+                                               ).first()
+        if exists:
+            tag_id = exists.id
+            if exists.deleted:
+                if exists.deleted_fk:
+                    data = json.loads(exists.deleted_fk)
+                    data["deleted"] = False
+                else:
+                    data = dict(deleted=False)
+                db(ttable.id == tag_id).update(**data)
+        else:
+            tag_id = ttable.insert(name=tag)
+        query = (ltable.tag_id == tag_id) & \
+                (ltable.incident_id == incident_id)
+        exists = db(query).select(ltable.id,
+                                  ltable.deleted,
+                                  ltable.deleted_fk,
+                                  limitby=(0, 1)
+                                  ).first()
+        if exists:
+            if exists.deleted:
+                if exists.deleted_fk:
+                    data = json.loads(exists.deleted_fk)
+                    data["deleted"] = False
+                else:
+                    data = dict(deleted=False)
+                db(ltable.id == exists.id).update(**data)
+        else:
+            ltable.insert(incident_id = incident_id,
+                          tag_id = tag_id,
+                          )
+
+        output = current.xml.json_message(True, 200, "Tag Added")
+        current.response.headers["Content-Type"] = "application/json"
+        return output
+
+    # -----------------------------------------------------------------------------
+    @staticmethod
+    def incident_remove_tag(r, **attr):
+        """
+            Remove a Tag from an Incident
+
+            S3Method for interactive requests
+            - designed to be called as an afterTagRemoved callback to tag-it.js
+        """
+
+        incident_id = r.id
+        if not incident_id or len(r.args) < 3:
+            raise HTTP(405, current.ERROR.BAD_METHOD)
+
+        tag = r.args[2]
+        db = current.db
+        s3db = current.s3db
+        ttable = s3db.cms_tag
+        exists = db(ttable.name == tag).select(ttable.id,
+                                               ttable.deleted,
+                                               limitby=(0, 1)
+                                               ).first()
+        if exists:
+            tag_id = exists.id
+            ltable = s3db.event_tag
+            query = (ltable.tag_id == tag_id) & \
+                    (ltable.incident_id == incident_id)
+            exists = db(query).select(ltable.id,
+                                      ltable.deleted,
+                                      limitby=(0, 1)
+                                      ).first()
+            if exists and not exists.deleted:
+                resource = s3db.resource("event_tag", id=exists.id)
+                resource.delete()
+
+        output = current.xml.json_message(True, 200, "Tag Removed")
+        current.response.headers["Content-Type"] = "application/json"
+        return output
+
+    # -----------------------------------------------------------------------------
+    @staticmethod
+    def incident_add_bookmark(r, **attr):
+        """
+            Bookmark an Incident
+
+            S3Method for interactive requests
+        """
+
+        incident_id = r.id
+        user = current.auth.user
+        user_id = user and user.id
+        if not incident_id or not user_id:
+            raise HTTP(405, current.ERROR.BAD_METHOD)
+
+        db = current.db
+        s3db = current.s3db
+        ltable = s3db.event_bookmark
+        query = (ltable.incident_id == incident_id) & \
+                (ltable.user_id == user_id)
+        exists = db(query).select(ltable.id,
+                                  ltable.deleted,
+                                  ltable.deleted_fk,
+                                  limitby=(0, 1)
+                                  ).first()
+        if exists:
+            link_id = exists.id
+            if exists.deleted:
+                if exists.deleted_fk:
+                    data = json.loads(exists.deleted_fk)
+                    data["deleted"] = False
+                else:
+                    data = dict(deleted=False)
+                db(ltable.id == link_id).update(**data)
+        else:
+            link_id = ltable.insert(incident_id = incident_id,
+                                    user_id = user_id,
+                                    )
+
+        output = current.xml.json_message(True, 200, "Bookmark Added")
+        current.response.headers["Content-Type"] = "application/json"
+        return output
+
+    # -----------------------------------------------------------------------------
+    @staticmethod
+    def incident_remove_bookmark(r, **attr):
+        """
+            Remove a Bookmark for an Incident
+
+            S3Method for interactive requests
+        """
+
+        incident_id = r.id
+        user = current.auth.user
+        user_id = user and user.id
+        if not incident_id or not user_id:
+            raise HTTP(405, current.ERROR.BAD_METHOD)
+
+        s3db = current.s3db
+        ltable = s3db.event_bookmark
+        query = (ltable.incident_id == incident_id) & \
+                (ltable.user_id == user_id)
+        exists = current.db(query).select(ltable.id,
+                                          ltable.deleted,
+                                          limitby=(0, 1)
+                                          ).first()
+        if exists and not exists.deleted:
+            resource = s3db.resource("event_bookmark", id=exists.id)
+            resource.delete()
+
+        output = current.xml.json_message(True, 200, "Bookmark Removed")
+        current.response.headers["Content-Type"] = "application/json"
+        return output
+
 
 # =============================================================================
 class S3IncidentReportModel(S3Model):
@@ -1672,6 +1872,43 @@ class S3EventAssetModel(S3Model):
                                       ],
                        super_entity = "budget_cost_item",
                        )
+
+        # Pass names back to global scope (s3.*)
+        return {}
+
+# =============================================================================
+class S3EventBookmarkModel(S3Model):
+    """
+        Bookmarks for Events &/or Incidents
+    """
+
+    names = ("event_bookmark",
+             )
+
+    def model(self):
+
+        #T = current.T
+
+        # ---------------------------------------------------------------------
+        # Bookamrks: Link table between Users & Events/Incidents
+        tablename = "event_bookmark"
+        self.define_table(tablename,
+                          #self.event_event_id(ondelete = "CASCADE"),
+                          self.event_incident_id(ondelete = "CASCADE"),
+                          Field("user_id", current.auth.settings.table_user),
+                          *s3_meta_fields())
+
+        #current.response.s3.crud_strings[tablename] = Storage(
+        #    label_create = T("Bookmark Incident"),
+        #    title_display = T("Bookmark Details"),
+        #    title_list = T("Bookmarks"),
+        #    title_update = T("Edit Bookmark"),
+        #    label_list_button = T("List Bookmarks"),
+        #    label_delete_button = T("Remove Bookmark for this Incident"),
+        #    msg_record_created = T("Bookmark added"),
+        #    msg_record_modified = T("Bookmark updated"),
+        #    msg_record_deleted = T("Bookmark removed"),
+        #    msg_list_empty = T("No Incidents currently bookmarked"))
 
         # Pass names back to global scope (s3.*)
         return {}
@@ -2400,6 +2637,39 @@ class S3EventSitRepModel(S3Model):
         return {}
 
 # =============================================================================
+class S3EventTagModel(S3Model):
+    """
+        Link Tags to Incidents
+    """
+
+    names = ("event_tag",
+             )
+
+    def model(self):
+
+        #T = current.T
+
+        # ---------------------------------------------------------------------
+        # Tasks
+        # Tasks are to be assigned to resources managed by this EOC
+        # - we manage in detail
+        # @ToDo: Task Templates
+
+        tablename = "event_tag"
+        self.define_table(tablename,
+                          #self.event_event_id(ondelete = "CASCADE"),
+                          self.event_incident_id(empty = False,
+                                                 ondelete = "CASCADE",
+                                                 ),
+                          self.cms_tag_id(empty = False,
+                                          ondelete = "CASCADE",
+                                          ),
+                          *s3_meta_fields())
+
+        # Pass names back to global scope (s3.*)
+        return {}
+
+# =============================================================================
 class S3EventTaskModel(S3Model):
     """
         Link Tasks to Incidents
@@ -2628,10 +2898,10 @@ def event_notification_dispatcher(r, **attr):
         raise HTTP(501, current.messages.BADMETHOD)
 
 # =============================================================================
-def event_incident_list_layout(list_id, item_id, resource, rfields, record,
-                               icon="incident"):
+def event_event_list_layout(list_id, item_id, resource, rfields, record,
+                            icon="event"):
     """
-        Default dataList item renderer for Projects on Profile pages
+        Default dataList item renderer for Incidents on Profile pages
 
         @param list_id: the HTML ID of the list
         @param item_id: the HTML ID of the item
@@ -2640,12 +2910,101 @@ def event_incident_list_layout(list_id, item_id, resource, rfields, record,
         @param record: the record as dict
     """
 
-    record_id = record["event_incident.id"]
+    record_id = record["event_event.id"]
     item_class = "thumbnail"
 
     raw = record._row
+    author = record["event_event.modified_by"]
+    #date = record["event_event.modified_on"]
+
+    name = record["event_event.name"]
+    event_type = record["event_event.event_type_id"] or ""
+    description = record["event_event.comments"]
+    start_date = record["event_event.start_date"]
+
+    location = record["event_event_location.location_id"] or ""
+    #location_id = raw["event_event.location_id"]
+
+    comments = raw["event_event.comments"]
+
+    # Edit Bar
+    # @ToDo: Consider using S3NavigationItem to hide the auth-related parts
+    permit = current.auth.s3_has_permission
+    table = current.db.event_event
+    if permit("update", table, record_id=record_id):
+        edit_btn = A(ICON("edit"),
+                     _href=URL(c="event", f="event",
+                               args=[record_id, "update.popup"],
+                               vars={"refresh": list_id,
+                                     "record": record_id},
+                               ),
+                     _class="s3_modal",
+                     _title=S3CRUD.crud_string(resource.tablename,
+                                               "title_update"),
+                     )
+    else:
+        edit_btn = ""
+    if permit("delete", table, record_id=record_id):
+        delete_btn = A(ICON("delete"),
+                       _class="dl-item-delete",
+                       _title=S3CRUD.crud_string(resource.tablename,
+                                                 "label_delete_button"),
+                       )
+    else:
+        delete_btn = ""
+    edit_bar = DIV(edit_btn,
+                   delete_btn,
+                   _class="edit-bar fright",
+                   )
+
+    # Render the item
+    item = DIV(DIV(ICON(icon),
+                   SPAN(event_type, _class="type-title"),
+                   SPAN(location, _class="location-title"),
+                   SPAN(start_date, _class="date-title"),
+                   edit_bar,
+                   _class="card-header",
+                   ),
+               DIV(DIV(A(name,
+                          _href=URL(c="event", f="event",
+                                    args=[record_id, "profile"])),
+                        _class="card-title"),
+                   DIV(DIV((description or ""),
+                           DIV(author or "",
+                               _class="card-person",
+                               ),
+                           _class="media",
+                           ),
+                       _class="media-body",
+                       ),
+                   _class="media",
+                   ),
+               #docs,
+               _class=item_class,
+               _id=item_id,
+               )
+
+    return item
+
+# =============================================================================
+def event_incident_list_layout(list_id, item_id, resource, rfields, record,
+                               icon="incident"):
+    """
+        Default dataList item renderer for Incidents on Profile pages
+
+        @param list_id: the HTML ID of the list
+        @param item_id: the HTML ID of the item
+        @param resource: the S3Resource to render
+        @param rfields: the S3ResourceFields to render
+        @param record: the record as dict
+    """
+
+    raw = record._row
+    record_id = raw["event_incident.id"]
+    item_class = "thumbnail"
+
     author = record["event_incident.modified_by"]
-    date = record["event_incident.modified_on"]
+    #date = record["event_incident.modified_on"]
 
     name = record["event_incident.name"]
     description = record["event_incident.comments"]
@@ -2686,14 +3045,16 @@ def event_incident_list_layout(list_id, item_id, resource, rfields, record,
                                      "record": record_id},
                                ),
                      _class="s3_modal",
-                     _title=current.response.s3.crud_strings.event_incident.title_update,
+                     _title=S3CRUD.crud_string(resource.tablename,
+                                               "title_update"),
                      )
     else:
         edit_btn = ""
     if permit("delete", table, record_id=record_id):
         delete_btn = A(ICON("delete"),
                        _class="dl-item-delete",
-                       _title=current.response.s3.crud_strings.event_incident.label_delete_button,
+                       _title=S3CRUD.crud_string(resource.tablename,
+                                                 "label_delete_button"),
                        )
     else:
         delete_btn = ""
@@ -2747,10 +3108,10 @@ def event_resource_list_layout(list_id, item_id, resource, rfields, record):
         @param record: the record as dict
     """
 
-    record_id = record["event_resource.id"]
+    raw = record._row
+    record_id = raw["event_resource.id"]
     item_class = "thumbnail"
 
-    raw = record._row
     author = record["event_resource.modified_by"]
     date = record["event_resource.date"]
     quantity = record["event_resource.value"]
@@ -2796,13 +3157,16 @@ def event_resource_list_layout(list_id, item_id, resource, rfields, record):
                                args=[record_id, "update.popup"],
                                vars=vars),
                      _class="s3_modal",
-                     _title=current.response.s3.crud_strings.event_resource.title_update,
+                     _title=S3CRUD.crud_string(resource.tablename,
+                                               "title_update"),
                      )
     else:
         edit_btn = ""
     if permit("delete", table, record_id=record_id):
         delete_btn = A(ICON("delete"),
                        _class="dl-item-delete",
+                       _title=S3CRUD.crud_string(resource.tablename,
+                                                 "label_delete_button"),
                        )
     else:
         delete_btn = ""

@@ -147,14 +147,16 @@ class S3OptionsMenu(default.S3OptionsMenu):
                       vars = {"closed": "0"})(
                         M("Create", m="create"),
                         M("All Cases", vars = {}),
-                        ),
-                    M("Activities", f="case_activity")(
-                       #M("Create", m="create"),
                         M(follow_up_label, f="due_followups"),
-                    ),
-                    #M("Need Types", f="need")(
-                    #   M("Create", m="create"),
-                    #),
+                        ),
+                    M("Activities", link=False)(
+                        M("Psychosocial Support", f="activity",
+                          vars={"service_type": "PSS"},
+                          ),
+                        M("Mental Health Support", f="activity",
+                          vars={"service_type": "MH"},
+                          ),
+                        ),
                     M("Archive", link=False)(
                         M("Closed Cases", f="person",
                           vars={"closed": "1"},
@@ -168,8 +170,9 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("Beneficiary Types", f="beneficiary_type"),
                         M("Housing Types", f="housing_type"),
                         M("Income Sources", f="income_source"),
-                        M("SNF Justifications", f="case_funding_reason"),
-                    ),
+                        M("Need Types", f="need"),
+                        M("SNF Justifications", f="activity_funding_reason"),
+                        ),
                 )
 
     # -------------------------------------------------------------------------
@@ -190,28 +193,25 @@ class S3OptionsMenu(default.S3OptionsMenu):
         return M(c=("org", "project"))(
                     M("Organizations", f="organisation")(
                         M("Create", m="create"),
-                        M("Import", m="import")
+                        #M("Import", m="import")
                     ),
                     #M("Offices", f="office")(
                     #    M("Create", m="create"),
                     #    M("Map", m="map"),
                     #    M("Import", m="import")
                     #),
-                    #M("Facilities", f="facility")(
-                    #    M("Create", m="create"),
-                    #    M("Import", m="import"),
-                    #),
+                    M("Facilities", f="facility")(
+                       M("Create", m="create"),
+                       #M("Import", m="import"),
+                    ),
                     M("Administration", c=("org", "project"), link=False,
                       restrict = [ADMIN])(
                         M("Organization Types", f="organisation_type"),
                         M("Service Types", f="service"),
+                        M("Facility Types", f="facility_type"),
                         M("Projects", c="project", f="project"),
                     ),
                     #M("Office Types", f="office_type",
-                    #  restrict=[ADMIN])(
-                    #    M("Create", m="create"),
-                    #),
-                    #M("Facility Types", f="facility_type",
                     #  restrict=[ADMIN])(
                     #    M("Create", m="create"),
                     #),

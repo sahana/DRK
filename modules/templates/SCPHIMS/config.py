@@ -125,6 +125,14 @@ def config(settings):
     #settings.mail.login = "username:password"
 
     # =========================================================================
+    # Mobile
+    #
+
+    settings.mobile.forms = [("Beneficiaries", "pr_person", {"c": "dvr",
+                                                             }),
+                             ]
+
+    # =========================================================================
     # Data Collection
     #
 
@@ -472,26 +480,26 @@ def config(settings):
                         "gender",
                         "person_details.disabled",
                         S3SQLInlineComponent(
-                                "contact",
+                                "phone",
                                 fields = [("", "value"),
                                           ],
-                                filterby = {"field": "contact_method",
-                                            "options": "SMS",
-                                            },
+                                #filterby = {"field": "contact_method",
+                                #            "options": "SMS",
+                                #            },
                                 label = T("Mobile Phone"),
                                 multiple = False,
-                                name = "phone",
+                                #name = "phone",
                                 ),
                         S3SQLInlineComponent(
-                                "contact",
+                                "email",
                                 fields = [("", "value"),
                                           ],
-                                filterby = {"field": "contact_method",
-                                            "options": "EMAIL",
-                                            },
+                                #filterby = {"field": "contact_method",
+                                #            "options": "EMAIL",
+                                #            },
                                 label = T("Email"),
                                 multiple = False,
-                                name = "email",
+                                #name = "email",
                                 ),
                         S3SQLInlineComponent(
                                 "address",
@@ -516,7 +524,7 @@ def config(settings):
         if r.function == "distribution":
             # Beneficiaries
             customise_beneficiary_form()
-            s3db.pr_address.location_id.default = r.record.location_id
+            current.s3db.pr_address.location_id.default = r.record.location_id
 
     settings.customise_pr_person_resource = customise_pr_person_resource
 

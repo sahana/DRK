@@ -339,6 +339,7 @@ class S3OrganisationModel(S3Model):
         define_table(tablename,
                      self.super_link("pe_id", "pr_pentity"),
                      Field("root_organisation", "reference org_organisation",
+                           ondelete = "CASCADE",
                            readable = False,
                            writable = False,
                            represent = S3Represent(lookup="org_organisation"),
@@ -2478,14 +2479,17 @@ class S3OrganisationServiceModel(S3Model):
         #
         tablename = "org_service"
         define_table(tablename,
+                     Field("root_service", "reference org_service",
+                           ondelete = "CASCADE",
+                           readable = False,
+                           writable = False,
+                           ),
                      Field("name", length=128, notnull=True,
-                           # Comment this if we need to support the same
-                           # service at different locations in hierarchy
-                           unique = True,
                            label = T("Name"),
                            requires = IS_NOT_EMPTY(),
                            ),
-                     Field("parent", "reference org_service", # This form of hierarchy may not work on all Databases
+                     # This form of hierarchy may not work on all Databases:
+                     Field("parent", "reference org_service",
                            label = T("SubType of"),
                            ondelete = "RESTRICT",
                            readable = hierarchical_service_types,
@@ -2504,6 +2508,8 @@ class S3OrganisationServiceModel(S3Model):
             hierarchy = "parent"
             # Can't be defined in-line as otherwise get a circular reference
             table = db[tablename]
+            table.root_service.represent = represent
+            onaccept = self.org_service_onaccept
             table.parent.represent = represent
             table.parent.requires = IS_EMPTY_OR(
                                         IS_ONE_OF(db, "org_service.id",
@@ -2514,6 +2520,7 @@ class S3OrganisationServiceModel(S3Model):
                                                   orderby="org_service.name"))
         else:
             hierarchy = None
+            onaccept = None
 
         # CRUD Strings
         crud_strings[tablename] = Storage(
@@ -2542,13 +2549,11 @@ class S3OrganisationServiceModel(S3Model):
                                      )
 
         configure(tablename,
-                  # Currently deduplicated by unique names, switch to
-                  # S3Duplicate if we need to support the same service
-                  # at different locations in hierarchy:
-                  #deduplicate = S3Duplicate(primary = ("name",),
-                  #                          secondary = ("parent",),
-                  #                          ),
+                  deduplicate = S3Duplicate(primary = ("name",),
+                                            secondary = ("parent",),
+                                            ),
                   hierarchy = hierarchy,
+                  onaccept = onaccept,
                   )
 
         # ---------------------------------------------------------------------
@@ -2799,6 +2804,13 @@ class S3OrganisationServiceModel(S3Model):
 
     # -------------------------------------------------------------------------
     @staticmethod
+    def org_service_onaccept(form):
+        """ Update the root_service """
+
+        org_service_root_service(form.vars["id"])
+
+    # -------------------------------------------------------------------------
+    @staticmethod
     def org_service_location_deduplicate(item):
         """ Import item de-duplication """
 
@@ -2830,6 +2842,59 @@ class S3OrganisationServiceModel(S3Model):
             if duplicate:
                 item.id = duplicate.id
                 item.method = item.METHOD.UPDATE
+
+# =============================================================================
+def org_service_root_service(service_id):
+    """ Update the root_service """
+
+    db = current.db
+    table = current.s3db.org_service
+
+    # Read the record
+    record = db(table.id == service_id).select(table.id,
+                                               table.root_service,
+                                               table.parent,
+                                               ).first()
+
+    try:
+        parent = record.parent
+        current_root = record.root_service
+    except AttributeError:
+        current.log.error("Cannot find record with service_id: %s" % service_id)
+        raise
+
+    if parent:
+        # Lookup the parent record recursively
+        if parent == service_id:
+            # Error caused by non-unique tuids in import XSLT (fixed now,
+            # but catching it anyway for the sake of a proper error message)
+            raise KeyError("Service #%s showing with parent #%s" % (service_id, parent))
+
+        new_root = org_service_root_service(parent)
+    else:
+        # We are the root
+        new_root = service_id
+
+    if current_root != new_root:
+
+        # Update this record and all its descendants
+        def descendants(ids):
+
+            rows = db(table.parent.belongs(ids)).select(table.id)
+            children = set(row.id for row in rows)
+
+            if children:
+                children |= descendants(children)
+                return ids | children
+            else:
+                return ids
+
+        # If this node doesn't have the correct root, the children
+        # won't have either, so update them all
+        nodes = descendants(set([service_id]))
+        db(table.id.belongs(nodes)).update(root_service=new_root)
+
+    return new_root
 
 # =============================================================================
 class S3OrganisationSummaryModel(S3Model):

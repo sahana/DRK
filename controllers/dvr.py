@@ -385,28 +385,11 @@ def group_membership():
                               )
 
 # -----------------------------------------------------------------------------
-def case_activity_type():
-    """ Case Activity Types: RESTful CRUD Controller """
+def activity():
+    """ Activities: RESTful CRUD Controller """
 
-    if settings.get_dvr_activity_types_hierarchical():
-
-        tablename = "dvr_case_activity_type"
-
-        from s3 import S3Represent
-        represent = S3Represent(lookup = tablename,
-                                hierarchy = True,
-                                translate = True,
-                                )
-
-        table = s3db[tablename]
-        field = table.parent
-        field.represent = represent
-        field.requires = IS_EMPTY_OR(IS_ONE_OF(db, "%s.id" % tablename,
-                                               represent,
-                                               orderby="%s.name" % tablename,
-                                               ))
-
-    return s3_rest_controller()
+    return s3_rest_controller(rheader = s3db.dvr_rheader,
+                              )
 
 # -----------------------------------------------------------------------------
 def case_activity():
@@ -458,7 +441,6 @@ def due_followups():
                        "need_details",
                        "emergency",
                        "referral_details",
-                       "followup",
                        "followup_date",
                        "completed",
                        ]
@@ -709,14 +691,14 @@ def case_event():
     return s3_rest_controller()
 
 # -----------------------------------------------------------------------------
-def case_funding_reason():
-    """ Case Funding Reasons: RESTful CRUD Controller """
+def activity_funding_reason():
+    """ Activity Funding Reasons: RESTful CRUD Controller """
 
     return s3_rest_controller()
 
 # -----------------------------------------------------------------------------
-def case_funding():
-    """ Case Funding Proposals: RESTful CRUD Controller """
+def activity_funding():
+    """ Activity Funding Proposals: RESTful CRUD Controller """
 
     return s3_rest_controller()
 

@@ -1306,7 +1306,6 @@ def vol_volunteer_controller():
 
     def prep(r):
         resource = r.resource
-        get_config = resource.get_config
 
         # CRUD String
         s3.crud_strings[resource.tablename] = s3.crud_strings["hrm_volunteer"]
@@ -1315,69 +1314,66 @@ def vol_volunteer_controller():
         table = r.table
         table.type.default = 2
 
-        # Volunteers use home address
-        location_id = table.location_id
-        location_id.label = T("Home Address")
-
         # Configure list_fields
         if r.representation == "xls":
-            # Split person_id into first/middle/last to
-            # make it match Import sheets
-            list_fields = ["person_id$first_name",
-                           "person_id$middle_name",
-                           "person_id$last_name",
-                           ]
+            s3db.hrm_xls_list_fields(r, staff=False)
         else:
             list_fields = ["person_id",
+                           "person_id$gender",
                            ]
-        if settings.get_hrm_use_code() is True:
-            list_fields.append("code")
-        list_fields.append("job_title_id")
-        if settings.get_hrm_multiple_orgs():
-            list_fields.append("organisation_id")
-        list_fields.extend(((settings.get_ui_label_mobile_phone(), "phone.value"),
-                            (T("Email"), "email.value"),
-                            "location_id",
-                            ))
-        if settings.get_hrm_use_trainings():
-            list_fields.append((T("Trainings"), "person_id$training.course_id"))
-        if settings.get_hrm_use_certificates():
-            list_fields.append((T("Certificates"), "person_id$certification.certificate_id"))
+            if settings.get_hrm_use_code() is True:
+                list_fields.append("code")
+            if settings.get_hrm_vol_roles():
+                list_fields.append("job_title_id")
+            if settings.get_hrm_vol_departments():
+                list_fields.append("department_id")
+            if settings.get_hrm_multiple_orgs():
+                list_fields.append("organisation_id")
+            list_fields.extend(((settings.get_ui_label_mobile_phone(), "phone.value"),
+                                (T("Email"), "email.value"),
+                                ))
+            # Volunteers use home address
+            location_id = table.location_id
+            location_id.label = T("Home Address")
+            list_fields.append("location_id")
+            if settings.get_hrm_use_trainings():
+                list_fields.append((T("Trainings"), "person_id$training.course_id"))
+            if settings.get_hrm_use_certificates():
+                list_fields.append((T("Certificates"), "person_id$certification.certificate_id"))
 
-        # Volunteer Programme and Active-status
-        report_options = get_config("report_options")
-        if vol_experience in ("programme", "both"):
-            # Don't use status field
-            table.status.readable = table.status.writable = False
-            # Use active field?
-            vol_active = settings.get_hrm_vol_active()
-            if vol_active:
-                list_fields.insert(3, (T("Active?"), "details.active"))
-            # Add Programme to List Fields
-            list_fields.insert(6, "person_id$hours.programme_id")
+            # Volunteer Programme and Active-status
+            report_options = resource.get_config("report_options")
+            if vol_experience in ("programme", "both"):
+                # Don't use status field
+                table.status.readable = table.status.writable = False
+                # Use active field?
+                vol_active = settings.get_hrm_vol_active()
+                if vol_active:
+                    list_fields.insert(3, (T("Active?"), "details.active"))
+                # Add Programme to List Fields
+                list_fields.insert(6, "person_id$hours.programme_id")
 
-            # Add active and programme to Report Options
-            report_fields = report_options.rows
-            report_fields.append("person_id$hours.programme_id")
-            if vol_active:
-                report_fields.append((T("Active?"), "details.active"))
-            report_options.rows = report_fields
-            report_options.cols = report_fields
-            report_options.fact = report_fields
-        else:
-            # Use status field
-            list_fields.append("status")
+                # Add active and programme to Report Options
+                report_fields = report_options.rows
+                report_fields.append("person_id$hours.programme_id")
+                if vol_active:
+                    report_fields.append((T("Active?"), "details.active"))
+                report_options.rows = report_fields
+                report_options.cols = report_fields
+                report_options.fact = report_fields
+            else:
+                # Use status field
+                list_fields.append("status")
 
-        # Update filter widgets
-        filter_widgets = \
-            s3db.hrm_human_resource_filters(resource_type="volunteer",
-                                            hrm_type_opts=s3db.hrm_type_opts)
+            # Update filter widgets
+            filter_widgets = \
+                s3db.hrm_human_resource_filters(resource_type="volunteer",
+                                                hrm_type_opts=s3db.hrm_type_opts)
 
-        # Reconfigure
-        resource.configure(list_fields = list_fields,
-                           filter_widgets = filter_widgets,
-                           report_options = report_options,
-                           )
+            # Reconfigure
+            resource.configure(list_fields = list_fields,
+                               filter_widgets = filter_widgets,
+                               )
 
         if r.interactive:
             if s3.rtl:
@@ -1627,9 +1623,10 @@ def vol_person_controller():
         # Plug-in role matrix for Admins/OrgAdmins
         S3PersonRoleManager.set_method(r, entity="pr_person")
 
+        method = r.method
         if r.representation == "s3json":
             current.xml.show_ids = True
-        elif r.interactive and r.method != "import":
+        elif r.interactive and method != "import":
             if s3.rtl:
                 # Ensure that + appears at the beginning of the number
                 f = s3db.pr_phone_contact.value
@@ -1717,7 +1714,7 @@ def vol_person_controller():
                                                    filter_opts=filter_opts,
                                                    )
 
-            if r.method == "record" or r.component_name == "human_resource":
+            if method == "record" or r.component_name == "human_resource":
                 table = s3db.hrm_human_resource
                 table.code.writable = table.code.readable = False
                 table.department_id.writable = table.department_id.readable = False
@@ -1740,11 +1737,21 @@ def vol_person_controller():
                 set_org_dependent_field("vol_volunteer_cluster", "vol_cluster_type_id")
                 set_org_dependent_field("vol_volunteer_cluster", "vol_cluster_id")
                 set_org_dependent_field("vol_volunteer_cluster", "vol_cluster_position_id")
+            elif method == "cv" or r.component_name == "training":
+                list_fields = ["course_id",
+                               "grade",
+                               ]
+                if settings.get_hrm_course_pass_marks:
+                    list_fields.append("grade_details")
+                list_fields.append("date")
+                s3db.configure("hrm_training",
+                               list_fields = list_fields,
+                               )
 
             resource = r.resource
             if mode is not None:
                 r.resource.build_query(id=current.auth.s3_logged_in_person())
-            elif r.method not in ("deduplicate", "search_ac"):
+            elif method not in ("deduplicate", "search_ac"):
                 if not r.id and not hr_id:
                     # pre-action redirect => must retain prior errors
                     if response.error:
@@ -1760,10 +1767,22 @@ def vol_person_controller():
                     redirect(URL(f="volunteer"))
                 if hr_id and r.component_name == "human_resource":
                     r.component_id = hr_id
-                configure("hrm_human_resource", insertable = False)
+                configure("hrm_human_resource",
+                          insertable = False)
 
-        elif r.component_name == "group_membership" and r.representation == "aadata":
-            s3db.hrm_configure_pr_group_membership()
+        elif r.representation == "aadata":
+            if r.component_name == "group_membership":
+                s3db.hrm_configure_pr_group_membership()
+            elif method == "cv" or r.component_name == "training":
+                list_fields = ["course_id",
+                               "grade",
+                               ]
+                if settings.get_hrm_course_pass_marks:
+                    list_fields.append("grade_details")
+                list_fields.append("date")
+                s3db.configure("hrm_training",
+                               list_fields = list_fields,
+                               )
 
         return True
     s3.prep = prep

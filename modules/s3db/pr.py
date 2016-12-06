@@ -1096,6 +1096,9 @@ class S3PersonModel(S3Model):
                             hrm_award = {"name": "staff_award",
                                          "joinby": "person_id",
                                          },
+                            vol_volunteer_award = {"name": "award",
+                                                   "joinby": "person_id",
+                                                   },
                             # Disciplinary Record
                             hrm_disciplinary_action = "person_id",
                             # Salary Information
@@ -1127,10 +1130,6 @@ class S3PersonModel(S3Model):
                                                  },
                             # Tags
                             pr_person_tag = "person_id",
-                            # Volunteer Awards
-                            vol_volunteer_award = {"name": "award",
-                                                   "joinby": "person_id",
-                                                   },
                             )
 
         # ---------------------------------------------------------------------
@@ -1282,6 +1281,7 @@ class S3PersonModel(S3Model):
             initials = s3_unicode(initials).lower()
 
         # @ToDo: Allow each name to be split into words in a different order
+        # - see pr_search_ac
         if fname and lname:
             query = (ptable.first_name.lower() == fname) & \
                     (ptable.last_name.lower() == lname)
@@ -1648,7 +1648,7 @@ class S3PersonModel(S3Model):
         site_contact_person = r.tablename == "org_site" # Coming from site_contact_person()
         if separate_name_fields or \
            site_contact_person:
-            middle_name = separate_name_fields == 2
+            middle_name = separate_name_fields == 3
             fields.extend((ptable.first_name,
                            ptable.middle_name,
                            ptable.last_name,
@@ -1778,7 +1778,6 @@ class S3PersonModel(S3Model):
 
         # Read Input
         post_vars = current.request.post_vars
-        name = post_vars["name"]
         dob = post_vars.get("dob", None)
         if dob:
             # Parse Date
@@ -1795,22 +1794,6 @@ class S3PersonModel(S3Model):
         home_phone = post_vars.get("hphone")
         email = post_vars.get("email")
 
-        separate_name_fields = settings.get_pr_separate_name_fields()
-        if separate_name_fields:
-            middle_name_field = separate_name_fields == 2
-
-            first_name = post_vars.get("first_name")
-            middle_name = post_vars.get("middle_name")
-            last_name = post_vars.get("last_name")
-        else:
-            # https://github.com/derek73/python-nameparser
-            from nameparser import HumanName
-            name = HumanName(name.lower())
-            first_name = name.first
-            middle_name = name.middle
-            last_name = name.last
-            #nick_name = name.nickname
-
         # @ToDo: Fuzzy Search
         # We need to use an Index since we can't read all values in do client-side
         # e.g. (Double) Metaphone or Levenshtein
@@ -1825,20 +1808,129 @@ class S3PersonModel(S3Model):
         # * MySQL:
         #    * http://forums.mysql.com/read.php?20,282935,282935#msg-282935
 
-        # Perform Search
-        # Names could be in the wrong order
-        # @ToDo: Allow each name to be split into words in a different order
-        query = (FS("first_name").lower().like(first_name + "%")) | \
-                (FS("middle_name").lower().like(first_name + "%")) | \
-                (FS("last_name").lower().like(first_name + "%"))
-        if middle_name:
-            query |= (FS("first_name").lower().like(middle_name + "%")) | \
-                     (FS("middle_name").lower().like(middle_name + "%")) | \
-                     (FS("last_name").lower().like(middle_name + "%"))
-        if last_name:
-            query |= (FS("first_name").lower().like(last_name + "%")) | \
-                     (FS("middle_name").lower().like(last_name + "%")) | \
-                     (FS("last_name").lower().like(last_name + "%"))
+        separate_name_fields = settings.get_pr_separate_name_fields()
+        if separate_name_fields:
+            middle_name_field = separate_name_fields == 3
+
+            first_name = post_vars.get("first_name")
+            middle_name = post_vars.get("middle_name")
+            last_name = post_vars.get("last_name")
+
+            # Names could be in the wrong order
+            # @ToDo: Allow each name to be split into words in a different order
+            query = (FS("first_name").lower().like(first_name + "%")) | \
+                    (FS("middle_name").lower().like(first_name + "%")) | \
+                    (FS("last_name").lower().like(first_name + "%"))
+            if middle_name:
+                query |= (FS("first_name").lower().like(middle_name + "%")) | \
+                         (FS("middle_name").lower().like(middle_name + "%")) | \
+                         (FS("last_name").lower().like(middle_name + "%"))
+            if last_name:
+                query |= (FS("first_name").lower().like(last_name + "%")) | \
+                         (FS("middle_name").lower().like(last_name + "%")) | \
+                         (FS("last_name").lower().like(last_name + "%"))
+
+        else:
+            # https://github.com/derek73/python-nameparser
+            #from nameparser import HumanName
+            #name = HumanName(name.lower())
+            #first_name = name.first
+            #middle_name = name.middle
+            #last_name = name.last
+            ##nick_name = name.nickname
+
+            name_format = settings.get_pr_name_format()
+            middle_name = "middle_name" in name_format
+
+            # Names could be in the wrong order
+            # Multiple Names could be in a single field
+            # Each name field could be split into words in a different order
+            # @ToDo: deployment_setting for fully loose matching?
+            # Single search term
+            # Value can be (part of) any of first_name, middle_name or last_name
+            value = post_vars.get("name")
+            query = (FS("first_name").lower().like(value + "%")) | \
+                    (FS("last_name").lower().like(value + "%"))
+            if middle_name:
+                query |= (FS("middle_name").lower().like(value + "%"))
+            if " " in value:
+                # Two search terms
+                # Values can be (part of) any of first_name, middle_name or last_name
+                # but we must have a (partial) match on both terms
+                # We must have a (partial) match on both terms
+                value1, value2 = value.split(" ", 1)
+                query |= (((FS("first_name").lower().like(value1 + "%")) & \
+                           (FS("last_name").lower().like(value2 + "%"))) | \
+                          ((FS("first_name").lower().like(value2 + "%")) & \
+                           (FS("last_name").lower().like(value1 + "%"))))
+                if middle_name:
+                    query |= (((FS("first_name").lower().like(value1 + "%")) & \
+                               (FS("middle_name").lower().like(value2 + "%"))) | \
+                              ((FS("first_name").lower().like(value2 + "%")) & \
+                               (FS("middle_name").lower().like(value1 + "%"))) | \
+                              ((FS("middle_name").lower().like(value1 + "%")) & \
+                               (FS("last_name").lower().like(value2 + "%"))) | \
+                              ((FS("middle_name").lower().like(value2 + "%")) & \
+                               (FS("last_name").lower().like(value1 + "%"))))
+                if " " in value2:
+                    # Three search terms
+                    # Values can be (part of) any of first_name, middle_name or last_name
+                    # but we must have a (partial) match on all terms
+                    value21, value3 = value2.split(" ", 1)
+                    value12 = "%s %s" % (value1, value21)
+                    query |= (((FS("first_name").lower().like(value12 + "%")) & \
+                               (FS("last_name").lower().like(value3 + "%"))) | \
+                              ((FS("first_name").lower().like(value3 + "%")) & \
+                               (FS("last_name").lower().like(value12 + "%"))))
+                    if middle_name:
+                        query |= (((FS("first_name").lower().like(value1 + "%")) & \
+                                   (FS("middle_name").lower().like(value21 + "%")) & \
+                                   (FS("last_name").lower().like(value3 + "%"))) | \
+                                  ((FS("first_name").lower().like(value1 + "%")) & \
+                                   (FS("last_name").lower().like(value21 + "%")) & \
+                                   (FS("middle_name").lower().like(value3 + "%"))) | \
+                                  ((FS("last_name").lower().like(value1 + "%")) & \
+                                   (FS("middle_name").lower().like(value21 + "%")) & \
+                                   (FS("first_name").lower().like(value3 + "%"))) | \
+                                  ((FS("last_name").lower().like(value1 + "%")) & \
+                                   (FS("first_name").lower().like(value21 + "%")) & \
+                                   (FS("middle_name").lower().like(value3 + "%"))))
+                    if " " in value3:
+                        # Four search terms
+                        # Values can be (part of) any of first_name, middle_name or last_name
+                        # but we must have a (partial) match on all terms
+                        value31, value4 = value3.split(" ", 1)
+                        value13 = "%s %s %s" % (value1, value21, value31)
+                        value22 = "%s %s" % (value21, value31)
+                        query |= (((FS("first_name").lower().like(value13 + "%")) & \
+                                   (FS("last_name").lower().like(value4 + "%"))) | \
+                                  ((FS("first_name").lower().like(value4 + "%")) & \
+                                   (FS("last_name").lower().like(value13 + "%"))))
+                        if middle_name:
+                            query |= (((FS("first_name").lower().like(value1 + "%")) & \
+                                       (FS("middle_name").lower().like(value22 + "%")) & \
+                                       (FS("last_name").lower().like(value4 + "%"))) | \
+                                      ((FS("first_name").lower().like(value1 + "%")) & \
+                                       (FS("last_name").lower().like(value22 + "%")) & \
+                                       (FS("middle_name").lower().like(value4 + "%"))) | \
+                                      ((FS("last_name").lower().like(value1 + "%")) & \
+                                       (FS("middle_name").lower().like(value22 + "%")) & \
+                                       (FS("first_name").lower().like(value4 + "%"))) | \
+                                      ((FS("last_name").lower().like(value1 + "%")) & \
+                                       (FS("first_name").lower().like(value22 + "%")) & \
+                                       (FS("middle_name").lower().like(value4 + "%"))) | \
+                                      ((FS("first_name").lower().like(value12 + "%")) & \
+                                       (FS("middle_name").lower().like(value31 + "%")) & \
+                                       (FS("last_name").lower().like(value4 + "%"))) | \
+                                      ((FS("first_name").lower().like(value12 + "%")) & \
+                                       (FS("last_name").lower().like(value31 + "%")) & \
+                                       (FS("middle_name").lower().like(value4 + "%"))) | \
+                                      ((FS("last_name").lower().like(value12 + "%")) & \
+                                       (FS("middle_name").lower().like(value31 + "%")) & \
+                                       (FS("first_name").lower().like(value4 + "%"))) | \
+                                      ((FS("last_name").lower().like(value12 + "%")) & \
+                                       (FS("first_name").lower().like(value31 + "%")) & \
+                                       (FS("middle_name").lower().like(value4 + "%"))))
 
         resource = r.resource
         resource.add_filter(query)
@@ -3005,16 +3097,21 @@ class S3AddressModel(S3Model):
         """
 
         form_vars = form.vars
-        location_id = form_vars.location_id
+        location_id = form_vars.get("location_id")
         if not location_id:
             return
 
+        try:
+            record_id = form_vars["id"]
+        except:
+            # Nothing we can do
+            return
         db = current.db
         s3db = current.s3db
         atable = db.pr_address
-        pe_id = db(atable.id == form_vars.id).select(atable.pe_id,
-                                                     limitby=(0, 1)
-                                                     ).first().pe_id
+        pe_id = db(atable.id == record_id).select(atable.pe_id,
+                                                  limitby=(0, 1)
+                                                  ).first().pe_id
         requestvars = current.request.form_vars
         settings = current.deployment_settings
         person = None
@@ -3035,7 +3132,7 @@ class S3AddressModel(S3Model):
                 # Hasn't yet been set so use this
                 S3Tracker()(db.pr_pentity, pe_id).set_base_location(location_id)
 
-        if person and str(form_vars.type) == "1": # Home Address
+        if person and str(form_vars.get("type")) == "1": # Home Address
             if settings.has_module("hrm"):
                 # Also check for relevant HRM record(s)
                 staff_settings = settings.get_hrm_location_staff()
@@ -4299,6 +4396,11 @@ class S3SubscriptionModel(S3Model):
                                 requires = IS_EMPTY_OR(
                                             IS_IN_SET(email_format_opts,
                                                       zero=None)),
+                                ),
+                          Field("attachment", "boolean",
+                                default = False,
+                                readable = False,
+                                writable = False,
                                 ),
                           s3_comments(),
                           *s3_meta_fields())

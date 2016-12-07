@@ -12,7 +12,7 @@ def config(settings):
 
     T = current.T
 
-    settings.base.system_name = T("Refugee Case Management")
+    settings.base.system_name = T("Beneficiary Data Management")
     #settings.base.system_name_short = T("Sahana")
 
     # PrePopulate data
@@ -121,6 +121,9 @@ def config(settings):
     INDIVIDUAL_SUPPORT = "Individual Support"
     MENTAL_HEALTH = "Mental Health"
 
+    # Set DVR Default Label
+    settings.dvr.label = "Beneficiary"
+
     # -------------------------------------------------------------------------
     def customise_dvr_home():
         """ Redirect dvr/index to dvr/person?closed=0 """
@@ -185,9 +188,14 @@ def config(settings):
                                                  filter = (FS("root_service") == root_service_id),
                                                  )
 
+                # Adapt label for "facilitator"
+                field = table.facilitator
+                field.label = T("Counselor")
+
                 # Custom list fields
                 list_fields = ["name",
                                "service_id",
+                               "facilitator",
                                "site_id",
                                "room_id",
                                ]
@@ -195,6 +203,7 @@ def config(settings):
                 # Custom form
                 crud_form = S3SQLCustomForm("name",
                                             "service_id",
+                                            "facilitator",
                                             "site_id",
                                             "room_id",
                                             "comments",
@@ -1565,8 +1574,8 @@ def stl_dvr_rheader(r, tabs=[]):
                         (T("Contact"), "contacts"),
                         (T("Household"), "household"),
                         (T("Economy"), "economy"),
-                        (T("Individual Support"), "case_activity"),
-                        (T("PSS"), "pss_activity"),
+                        (T("Individual Case Management"), "case_activity"),
+                        (T("Group Activities"), "pss_activity"),
                         (T("Mental Health"), "mh_activity"),
                         ]
 

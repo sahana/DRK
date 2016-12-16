@@ -2,7 +2,7 @@
 
 from collections import OrderedDict
 
-from gluon import current, DIV, H3, IS_EMPTY_OR, IS_IN_SET, SPAN, URL
+from gluon import current, DIV, H3, IS_EMPTY_OR, IS_IN_SET, IS_NOT_EMPTY, SPAN, URL
 from gluon.storage import Storage
 
 def config(settings):
@@ -180,7 +180,7 @@ def config(settings):
                 field.requires = IS_ONE_OF(db, "org_service.id",
                                            field.represent,
                                            filterby = "root_service",
-                                           filter_opts = root_service_id,
+                                           filter_opts = (root_service_id,),
                                            sort=True,
                                            )
                 field.widget = S3HierarchyWidget(multiple = False,
@@ -310,8 +310,8 @@ def config(settings):
                                     )
             field.represent = represent
             field.requires = IS_EMPTY_OR(IS_ONE_OF(db, "project_project.id",
-                                                represent,
-                                                ))
+                                                   represent,
+                                                   ))
             field.comment = None
             field.label = T("Project Code")
 
@@ -358,16 +358,6 @@ def config(settings):
         elif r.component_name == "case_activity" or r.function == "due_followups":
             # "Individual Support" tab or "Due Follow-ups"
 
-            if r.function == "due_followups":
-                table = r.table
-                component = r.resource
-            else:
-                table = r.component.table
-                component = r.component
-
-            expose_project_id(table)
-            expose_human_resource_id(table)
-
             # Get service root type
             stable = s3db.org_service
             query = (stable.parent == None) & \
@@ -376,16 +366,24 @@ def config(settings):
             service = db(query).select(stable.id, limitby=(0, 1)).first()
             root_service_id = service.id if service else None
 
-            # Filter component for service root types
-            query = (FS("service_id$root_service") == root_service_id)
-            component.add_filter(query)
+            if r.function == "due_followups":
+                table = r.table
+                # Filter activities by root service
+                query = (FS("service_id$root_service") == root_service_id)
+                r.resource.add_filter(query)
+            else:
+                table = r.component.table
+                component = r.component
+
+            expose_project_id(table)
+            expose_human_resource_id(table)
 
             # Adjust validator and widget for service_id
             field = table.service_id
             field.requires = IS_ONE_OF(db, "org_service.id",
                                        field.represent,
                                        filterby = "root_service",
-                                       filter_opts = root_service_id,
+                                       filter_opts = (root_service_id,),
                                        sort=True,
                                        )
             field.widget = S3HierarchyWidget(multiple = False,
@@ -465,10 +463,6 @@ def config(settings):
             rows = db(query).select(stable.id)
             root_service_ids = [row.id for row in rows]
 
-            # Filter component for service root types
-            query = (FS("service_id$root_service").belongs(root_service_ids))
-            r.component.add_filter(query)
-
             # Filter service types
             field = table.service_id
             field.requires = IS_ONE_OF(db, "org_service.id",
@@ -507,6 +501,10 @@ def config(settings):
 })'''
                s3.jquery_ready.append(script)
 
+            # No follow-ups for PSS
+            table.followup.default = False
+            table.followup_date.default = None
+
             # Custom CRUD form
             crud_form = S3SQLCustomForm("person_id",
                                         "project_id",
@@ -537,16 +535,12 @@ def config(settings):
             service = db(query).select(stable.id, limitby=(0, 1)).first()
             root_service_id = service.id if service else None
 
-            # Filter component for service root type
-            query = (FS("service_id$root_service") == root_service_id)
-            r.component.add_filter(query)
-
             # Filter service types
             field = table.service_id
             field.requires = IS_ONE_OF(db, "org_service.id",
                                        field.represent,
                                        filterby = "root_service",
-                                       filter_opts = root_service_id,
+                                       filter_opts = (root_service_id,),
                                        sort=True,
                                        )
             field.widget = S3HierarchyWidget(multiple = False,
@@ -593,6 +587,10 @@ def config(settings):
 'optional': true
 })'''
                 s3.jquery_ready.append(script)
+
+            # No follow-ups for MH
+            table.followup.default = False
+            table.followup_date.default = None
 
             # Custom CRUD form
             crud_form = S3SQLCustomForm("person_id",
@@ -841,21 +839,45 @@ def config(settings):
                             action = s3db.pr_Contacts,
                             )
 
-        table = s3db.pr_person
-
-        # Remove default tooltip for pe_label
-        field = table.pe_label
-        field.comment = None
-
-        # Use "Gender" as label for gender field
-        field = table.gender
-        field.label = current.T("Gender")
-
         if r.controller == "dvr":
-            # Default nationality for case beneficiaries is Syrian
+
+            from s3 import IS_PERSON_GENDER
+
+            table = s3db.pr_person
+
+            # ID label is required, remove tooltip
+            field = table.pe_label
+            field.comment = None
+            requires = field.requires
+            if isinstance(requires, IS_EMPTY_OR):
+                field.requires = requires.other
+
+            # Last name is required
+            field = table.last_name
+            field.requires = IS_NOT_EMPTY()
+
+            # Date of Birth is required
+            field = table.date_of_birth
+            requires = field.requires
+            if isinstance(requires, IS_EMPTY_OR):
+                field.requires = requires.other
+
+            # Gender is required, remove "unknown" option, adjust label
+            field = table.gender
+            field.label = current.T("Gender")
+            field.default = None
+            options = dict(s3db.pr_gender_opts)
+            del options[1] # Remove "unknown"
+            field.requires = IS_PERSON_GENDER(options, sort=True)
+
             dtable = s3db.pr_person_details
+
+            # Nationality is required, default is Syrian
             field = dtable.nationality
             field.default = "SY"
+            requires = field.requires
+            if isinstance(requires, IS_EMPTY_OR):
+                field.requires = requires.other
 
     settings.customise_pr_person_resource = customise_pr_person_resource
 
@@ -871,32 +893,36 @@ def config(settings):
         query = (stable.deleted != True)
         rows = db(query).select(stable.id,
                                 stable.name,
+                                stable.parent,
                                 stable.root_service,
                                 cache = s3db.cache,
+                                orderby = stable.root_service,
                                 )
-        mh_service_id = None
-        is_service_id = None
-        for row in rows:
-            name = row.name
-            if name == "Mental Health":
-                mh_service_id = row.id
-            elif name == "Individual Support":
-                is_service_id = row.id
 
+        # Group service IDs by root service
         mh_service_ids = []
-        mappend = mh_service_ids.append
         is_service_ids = []
-        mappend = is_service_ids.append
         pss_service_ids = []
-        pappend = pss_service_ids.append
+        service_ids = pss_service_ids
+        group = set()
+        root_service = None
         for row in rows:
-            root_service = row.root_service
-            if root_service == mh_service_id:
-                mappend(row.id)
-            elif root_service == mh_service_id:
-                iappend(row.id)
-            else:
-                pappend(row.id)
+            if row.parent is None:
+                name = row.name
+                if name == INDIVIDUAL_SUPPORT:
+                    service_ids = is_service_ids
+                elif name == MENTAL_HEALTH:
+                    service_ids = mh_service_ids
+                else:
+                    # Everything else is PSS
+                    service_ids = pss_service_ids
+            if row.root_service != root_service:
+                if group:
+                    service_ids.extend(group)
+                group = set()
+                root_service = row.root_service
+            group.add(row.id)
+        service_ids.extend(group)
 
         # Custom activity components (differentiated by service type)
         s3db.add_components("pr_person",
@@ -943,7 +969,6 @@ def config(settings):
 
                 from s3 import IS_ONE_OF, S3HierarchyWidget
 
-                table = r.table
                 ctable = s3db.dvr_case
 
                 # Remove empty option from case status selector
@@ -955,6 +980,9 @@ def config(settings):
 
                 # Hierarchical Organisation Selector
                 field = ctable.organisation_id
+                requires = field.requires
+                if isinstance(requires, IS_EMPTY_OR):
+                    field.requires = requires.other
                 represent = s3db.org_OrganisationRepresent(parent=False)
                 field.widget = S3HierarchyWidget(lookup="org_organisation",
                                                  represent=represent,
@@ -989,17 +1017,21 @@ def config(settings):
 })'''
                 s3.jquery_ready.append(script)
 
-                # Visibility and tooltip for consent flag
+                # Visibility and tooltip for consent flag, make mandatory
                 field = ctable.disclosure_consent
                 field.readable = field.writable = True
+                requires = field.requires
+                if isinstance(requires, IS_EMPTY_OR):
+                    field.requires = requires.other
                 field.comment = DIV(_class="tooltip",
                                     _title="%s|%s" % (T("Consenting to Data Disclosure"),
                                                       T("Is the client consenting to disclosure of their data towards partner organisations and authorities?"),
                                                       ),
                                     )
 
-                # Custom label for registered-flag
                 dtable = s3db.dvr_case_details
+
+                # Custom label for registered-flag
                 field = dtable.registered
                 field.default = False
                 field.label = T("Registered with Turkish Authorities")
@@ -1028,6 +1060,7 @@ def config(settings):
                                 #"middle_name",
                                 "last_name",
                                 "person_details.nationality",
+                                "case_details.arrival_date",
                                 "date_of_birth",
                                 "gender",
                                 "person_details.marital_status",
@@ -1043,6 +1076,7 @@ def config(settings):
                                         label = T("Family ID Number"),
                                         multiple = False,
                                         name = "family_id",
+                                        required = True,
                                         ),
                                 S3SQLInlineComponent(
                                         "address",

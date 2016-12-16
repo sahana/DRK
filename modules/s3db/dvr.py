@@ -148,6 +148,7 @@ class DVRCaseModel(S3Model):
                      Field("code", length=64, notnull=True, unique=True,
                            label = T("Status Code"),
                            requires = [IS_NOT_EMPTY(),
+                                       IS_LENGTH(64),
                                        IS_NOT_ONE_OF(db,
                                                      "%s.code" % tablename,
                                                      ),
@@ -599,6 +600,9 @@ class DVRCaseModel(S3Model):
                            label = T("Officially Registered"),
                            represent = s3_yes_no_represent,
                            ),
+                     s3_date("arrival_date",
+                             label = T("Arrival Date"),
+                             ),
                      *s3_meta_fields())
 
         # ---------------------------------------------------------------------
@@ -1183,6 +1187,7 @@ class DVRNotesModel(S3Model):
                      Field("name", length=128, unique=True,
                            label = T("Name"),
                            requires = [IS_NOT_EMPTY(),
+                                       IS_LENGTH(128),
                                        IS_NOT_ONE_OF(db,
                                                      "dvr_note_type.name",
                                                      ),
@@ -1667,6 +1672,7 @@ class DVRCaseAppointmentModel(S3Model):
         define_table(tablename,
                      Field("name", length=64, notnull=True, unique=True,
                            requires = [IS_NOT_EMPTY(),
+                                       IS_LENGTH(64),
                                        IS_NOT_ONE_OF(db,
                                                      "%s.name" % tablename,
                                                      ),
@@ -2690,6 +2696,7 @@ class DVRCaseEventModel(S3Model):
                      Field("code", notnull=True, length=64, unique=True,
                            label = T("Code"),
                            requires = [IS_NOT_EMPTY(),
+                                       IS_LENGTH(64),
                                        IS_NOT_ONE_OF(db,
                                                      "dvr_case_event_type.code",
                                                      ),
@@ -6170,9 +6177,15 @@ def dvr_rheader(r, tabs=[]):
 
         elif tablename == "dvr_activity":
 
+            label = current.deployment_settings.get_dvr_label()
+            if label == "Beneficiary":
+                CASES = T("Beneficiaries")
+            else:
+                CASES = T("Cases")
+
             if not tabs:
                 tabs = [(T("Basic Details"), None),
-                        (T("Cases"), "case_activity"),
+                        (CASES, "case_activity"),
                         ]
 
             rheader_fields = [["name"],

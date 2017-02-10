@@ -811,7 +811,13 @@ class S3Config(Storage):
         """
             The Public URL for the site - for use in email links, etc
         """
-        return self.base.get("public_url", "http://127.0.0.1:8000")
+        public_url = self.base.get("public_url")
+        if not public_url:
+            env = current.request.env
+            scheme = env.get("wsgi_url_scheme", "http").lower()
+            host = env.get("http_host") or "127.0.0.1:8000"
+            self.base.public_url = public_url = "%s://%s" % (scheme, host)
+        return public_url
 
     def get_base_cdn(self):
         """
@@ -1564,6 +1570,7 @@ class S3Config(Storage):
             e.g. Apellido Paterno in Hispanic names
 
             Setting this means that auth_user.last_name matches with pr_person.middle_name
+            e.g. RMSAmericas
         """
         return self.__lazy("L10n", "mandatory_middlename", False)
 
@@ -2289,10 +2296,10 @@ class S3Config(Storage):
         """
             Custom function that returns the list of document_ids to be sent
             as attachment in email
-            
+
             The function may be of the form:
             custom_msg_notify_attachment(resource, data, meta_data), where
-            resource is the S3Resource, data: the data returned from 
+            resource is the S3Resource, data: the data returned from
             S3Resource.select and meta_data: the meta data for the notification
             (see s3notify for the metadata)
         """
@@ -2817,6 +2824,20 @@ class S3Config(Storage):
         """
         return self.dvr.get("manage_transferability", False)
 
+    def get_dvr_case_activity_needs_multiple(self):
+        """
+            Whether Case Activities link to Multiple Needs
+            - e.g. DRK: False
+            - e.g. STL: True
+        """
+        return self.dvr.get("case_activity_needs_multiple", False)
+
+    def get_dvr_case_events_close_appointments(self):
+        """
+            Whether case events automatically close appointments
+        """
+        return self.dvr.get("case_events_close_appointments", False)
+
     def get_dvr_case_flags(self):
         """
             Enable features to manage case flags
@@ -2853,12 +2874,6 @@ class S3Config(Storage):
             status when set to "completed"
         """
         return self.dvr.get("appointments_update_case_status", False)
-
-    def get_dvr_case_events_close_appointments(self):
-        """
-            Whether case events automatically close appointments
-        """
-        return self.dvr.get("case_events_close_appointments", False)
 
     def get_dvr_payments_update_last_seen_on(self):
         """
@@ -3308,6 +3323,7 @@ class S3Config(Storage):
     def get_hrm_record_label(self):
         """
             Label to use for the HR record tab
+            - string not LazyT
         """
         label = self.__lazy("hrm", "record_label", default=None)
         if not label:
@@ -3699,6 +3715,12 @@ class S3Config(Storage):
                 settings.mobile.forms = [("Request", "req_req")]
         """
         return self.__lazy("mobile", "forms", [])
+
+    def get_mobile_dynamic_tables(self):
+        """
+            Expose mobile forms for dynamic tables
+        """
+        return self.mobile.get("dynamic_tables", True)
 
     # -------------------------------------------------------------------------
     # Organisations
@@ -4247,6 +4269,12 @@ class S3Config(Storage):
             Link Activities to Events
         """
         return self.project.get("event_activities", False)
+
+    def get_project_event_projects(self):
+        """
+            Link Projects to Events
+        """
+        return self.project.get("event_projects", False)
 
     def get_project_goals(self):
         """

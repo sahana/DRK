@@ -34,7 +34,6 @@ __all__ = ("S3EventModel",
            "S3IncidentTypeModel",
            "S3IncidentTypeTagModel",
            "S3EventActivityModel",
-           "S3EventAlertModel",
            "S3EventAssetModel",
            "S3EventBookmarkModel",
            "S3EventCMSModel",
@@ -45,7 +44,8 @@ __all__ = ("S3EventModel",
            #"S3EventIReportModel",
            "S3EventMapModel",
            "S3EventOrganisationModel",
-           #"S3EventRequestModel",
+           "S3EventProjectModel",
+           "S3EventRequestModel",
            "S3EventResourceModel",
            "S3EventSiteModel",
            "S3EventSitRepModel",
@@ -437,6 +437,11 @@ class S3EventModel(S3Model):
 
         # Components
         self.add_components(tablename,
+                            cms_post = {"link": "event_post",
+                                        "joinby": "event_id",
+                                        "key": "post_id",
+                                        "actuate": "replace",
+                                        },
                             event_incident = "event_id",
                             dc_collection = {"link": "event_collection",
                                              "joinby": "event_id",
@@ -466,8 +471,17 @@ class S3EventModel(S3Model):
                                                 "key": "activity_id",
                                                 "actuate": "replace",
                                                 },
+                            event_project = {"name": "event_project",
+                                             "joinby": "event_id",
+                                             },
+                            project_project = {"link": "event_project",
+                                               "joinby": "event_id",
+                                               "key": "project_id",
+                                               "actuate": "replace",
+                                               },
                             event_event_location = "event_id",
-                            event_post = "event_id",
+                            # Should be able to do everything via the cms_post variant
+                            #event_post = "event_id",
                             event_event_tag = {"name": "tag",
                                                "joinby": "event_id",
                                                },
@@ -478,7 +492,12 @@ class S3EventModel(S3Model):
                                         "actuate": "hide",
                                         "autodelete": False,
                                         },
-                            req_req = "event_id",
+                            req_req = {"link": "event_request",
+                                       "joinby": "event_id",
+                                       "key": "req_id",
+                                       "actuate": "hide",
+                                       "autodelete": False,
+                                       },
                             stats_impact = {"link": "event_event_impact",
                                             "joinby": "event_id",
                                             "key": "impact_id",
@@ -1328,6 +1347,55 @@ class S3IncidentReportModel(S3Model):
         return {}
 
 # =============================================================================
+class S3EventActivityModel(S3Model):
+    """
+        Link Project Activities to Events
+    """
+
+    names = ("event_activity",
+             )
+
+    def model(self):
+
+        tablename = "event_activity"
+        self.define_table(tablename,
+                          self.event_event_id(empty = False,
+                                              ondelete = "CASCADE",
+                                              ),
+                          #self.event_incident_id(ondelete = "CASCADE"),
+                          self.project_activity_id(#ondelete = "CASCADE", # default anyway
+                                                   ),
+                          *s3_meta_fields())
+
+        # Pass names back to global scope (s3.*)
+        return {}
+
+# =============================================================================
+class S3EventRequestModel(S3Model):
+    """
+        Link Requests to Events
+    """
+
+    names = ("event_request",
+             )
+
+    def model(self):
+
+        tablename = "event_request"
+        self.define_table(tablename,
+                          self.event_event_id(default = current.session.s3.event,
+                                              empty = False,
+                                              ondelete = "CASCADE",
+                                              ),
+                          #self.event_incident_id(ondelete = "CASCADE"),
+                          self.req_req_id(#ondelete = "CASCADE", # default anyway
+                                          ),
+                          *s3_meta_fields())
+
+        # Pass names back to global scope (s3.*)
+        return {}
+
+# =============================================================================
 class S3EventResourceModel(S3Model):
     """
         Resources Assigned to Events/Incidents
@@ -1674,28 +1742,6 @@ class S3IncidentTypeTagModel(S3Model):
                           Field("tag", label=T("Key")),
                           Field("value", label=T("Value")),
                           s3_comments(),
-                          *s3_meta_fields())
-
-        # Pass names back to global scope (s3.*)
-        return {}
-
-# =============================================================================
-class S3EventActivityModel(S3Model):
-    """
-        Link Project Activities to Events
-    """
-
-    names = ("event_activity",
-             )
-
-    def model(self):
-
-        tablename = "event_activity"
-        self.define_table(tablename,
-                          self.event_event_id(empty = False,
-                                              ondelete = "CASCADE"),
-                          #self.event_incident_id(ondelete = "CASCADE"),
-                          self.project_activity_id(empty = False),
                           *s3_meta_fields())
 
         # Pass names back to global scope (s3.*)
@@ -2494,6 +2540,29 @@ class S3EventOrganisationModel(S3Model):
         return {}
 
 # =============================================================================
+class S3EventProjectModel(S3Model):
+    """
+        Link Projects to Events
+    """
+
+    names = ("event_project",
+             )
+
+    def model(self):
+
+        tablename = "event_project"
+        self.define_table(tablename,
+                          self.event_event_id(empty = False,
+                                              ondelete = "CASCADE"),
+                          #self.event_incident_id(ondelete = "CASCADE"),
+                          self.project_project_id(#ondelete = "CASCADE", # default anyway
+                                                  ),
+                          *s3_meta_fields())
+
+        # Pass names back to global scope (s3.*)
+        return {}
+
+# =============================================================================
 class S3EventSiteModel(S3Model):
     """
         Link Sites (Facilities) to Incidents
@@ -3258,6 +3327,8 @@ def event_rheader(r):
                 tabs.append((T("Targets"), "target"))
             if settings.get_event_collection_tab():
                 tabs.append((T("Assessments"), "collection"))
+            if settings.get_project_event_projects():
+                tabs.append((T("Projects"), "project"))
             if settings.get_project_event_activities():
                 tabs.append((T("Activities"), "activity"))
             if settings.has_module("cr"):

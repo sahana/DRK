@@ -38,6 +38,7 @@ __all__ = ("S3ContentModel",
            "cms_customise_post_fields",
            "cms_post_list_layout",
            "S3CMS",
+           #"cms_Calendar",
            )
 
 import datetime
@@ -58,6 +59,7 @@ class S3ContentModel(S3Model):
     """
 
     names = ("cms_series",
+             "cms_status",
              "cms_post",
              "cms_post_id",
              "cms_post_module",
@@ -161,6 +163,54 @@ class S3ContentModel(S3Model):
                        )
 
         # ---------------------------------------------------------------------
+        # Post Statuses
+        # - used by WACOP
+        #
+        tablename = "cms_status"
+        define_table(tablename,
+                     Field("name", length=128, notnull=True, unique=True,
+                           label = T("Name"),
+                           requires = [IS_NOT_EMPTY(),
+                                       IS_LENGTH(128),
+                                       ],
+                           ),
+                     s3_comments(),
+                     *s3_meta_fields())
+
+        # CRUD Strings
+        ADD_STATUS = T("Create Status")
+        crud_strings[tablename] = Storage(
+            label_create = ADD_STATUS,
+            title_display = T("Status Details"),
+            title_list = T("Statuses"),
+            title_update = T("Edit Status"),
+            #title_upload = T("Import Statuses"),
+            label_list_button = T("List Statuses"),
+            label_delete_button = T("Delete Status"),
+            msg_record_created = T("Status added"),
+            msg_record_modified = T("Status updated"),
+            msg_record_deleted = T("Status deleted"),
+            msg_list_empty = T("No Statuses currently registered"))
+
+        # Reusable Field
+        represent = S3Represent(lookup=tablename, translate=True)
+                                #none = T("Unknown"))
+        status_id = S3ReusableField("status_id", "reference %s" % tablename,
+                        comment = S3PopupLink(title = ADD_STATUS,
+                                              c = "cms",
+                                              f = "status",
+                                              ),
+                        label = T("Status"),
+                        ondelete = "SET NULL",
+                        represent = represent,
+                        requires = IS_EMPTY_OR(
+                                    IS_ONE_OF(db, "cms_status.id",
+                                              represent,
+                                              sort=True)),
+                        sortby = "name",
+                        )
+
+        # ---------------------------------------------------------------------
         # Posts
         # - single blocks of [rich] text which can be embedded into a page,
         #   be viewed as full pages or as part of a Series
@@ -172,6 +222,13 @@ class S3ContentModel(S3Model):
         else:
             body_represent = lambda body: XML(s3_URLise(body))
             body_widget = None
+
+        # WACOP Priorities
+        # @ToDo: Add deployment_setting if these need to be different in other templates
+        post_priority_opts = {1: T("Informational"),
+                              2: T("Important"),
+                              3: T("Critical"),
+                              }
 
         tablename = "cms_post"
         define_table(tablename,
@@ -191,8 +248,8 @@ class S3ContentModel(S3Model):
                            #requires = IS_NOT_EMPTY(),
                            widget = body_widget,
                            ),
+                     s3_datetime(default = "now"),
                      # @ToDo: Move this to link table?
-                     # - although this makes widget hard!
                      self.gis_location_id(),
                      # @ToDo: Move this to link table?
                      # - although this makes widget hard!
@@ -211,7 +268,21 @@ class S3ContentModel(S3Model):
                            label = T("Comments permitted?"),
                            represent = s3_yes_no_represent,
                            ),
-                     s3_datetime(default = "now"),
+                     Field("priority", "integer",
+                           default = 1,
+                           label = T("Priority"),
+                           represent = lambda opt: \
+                                       post_priority_opts.get(opt,
+                                                              current.messages.UNKNOWN_OPT),
+                           requires = IS_IN_SET(post_priority_opts,
+                                                zero=None),
+                           # Enable in template if-desired
+                           readable = False,
+                           writable = False,
+                           ),
+                     status_id(readable = False,
+                               writable = False,
+                               ),
                      # @ToDo: Also have a datetime for 'Expires On'
                      Field("expired", "boolean",
                            default = False,
@@ -430,7 +501,7 @@ class S3ContentModel(S3Model):
         #
         tablename = "cms_post_module"
         define_table(tablename,
-                     post_id(empty=False),
+                     post_id(empty = False),
                      Field("module",
                            comment = T("If you specify a module, but no resource, then this will be used as the text in that module's index page"),
                            label = T("Module"),
@@ -1841,6 +1912,9 @@ class cms_Calendar(S3Method):
             if r.representation == "html":
                 output = self.html(r, **attr)
                 return output
+            #elif r.representation == "pdf":
+            #    output = self.pdf(r, **attr)
+            #    return output
             #elif r.representation == "xls":
             #    output = self.xls(r, **attr)
             #    return output
@@ -1852,8 +1926,6 @@ class cms_Calendar(S3Method):
             Extract the Data
         """
 
-        rows = 0
-
         # Respect any filters present
         resource = r.resource
 
@@ -1861,16 +1933,55 @@ class cms_Calendar(S3Method):
         resource.add_filter((FS("date") > days[0].replace(hour = 0, minute=0, second=0, microsecond=0)) & \
                             (FS("date") < days[-1].replace(hour = 23, minute=59, second=59)))
 
-        fields = ["name",
+        # @ToDo: Configurable fields (location_id not always relevant, but e.g. Author may be)
+        fields = ["body",
                   "date",
                   "location_id",
+                  "post_module.module",
+                  "post_module.resource",
+                  "post_module.record",
                   ]
 
-        posts = resource.select(fields)
+        data = resource.select(fields, represent=True, raw_data=True)
 
-        # @ToDo: Reformat posts into Array by day & return the maximum number of Posts in a day
+        # Reformat posts into Array of rows and columns (days)
+        # Need to start with the columns as we don't yet know how many rows we need
+        cols = []
+        cappend = cols.append
+        max_rows = []
+        mappend = max_rows.append
+        # Initialise arrays
+        for day in days:
+            cappend([])
+            mappend(0)
 
-        return rows, posts
+        # Place each record into the correct day's column
+        len_days = len(days)
+        for record in data.rows:
+            date = record._row["cms_post.date"]
+            for i in range(len_days):
+                if date < days[i + 1]:
+                    cols[i].append(record)
+                    max_rows[i] += 1
+                    break
+
+        # Now convert to rows
+        rows = []
+        rappend = rows.append
+        len_rows = max(max_rows)
+        # Initialise array
+        for i in range(len_rows):
+            rappend([])
+
+        for row in rows:
+            rappend = row.append
+            for col in cols:
+                if len(col):
+                    rappend(col.pop())
+                else:
+                    rappend(Storage())
+
+        return rows
 
     # -------------------------------------------------------------------------
     def html(self, r, **attr):
@@ -1893,7 +2004,7 @@ class cms_Calendar(S3Method):
                 now + timedelta(days = 5),
                 )
 
-        rows, posts = self._extract(days, r, **attr)
+        posts = self._extract(days, r, **attr)
 
         item = TABLE()
         title_row = TR()
@@ -1901,6 +2012,18 @@ class cms_Calendar(S3Method):
         for day in days:
             rappend(TD(day.strftime("%A")))
         item.append(title_row)
+
+        for row in posts:
+            data_row = TR()
+            rappend = data_row.append
+            row.reverse()
+            for day in days:
+                post = row.pop()
+                if post:
+                    rappend(TD(self.post_layout(post)))
+                else:
+                    rappend(TD())
+            item.append(data_row)
 
         output = dict(item=item)
         output["title"] = T("Weekly Schedule")
@@ -1913,5 +2036,30 @@ class cms_Calendar(S3Method):
 
         current.response.view = "simple.html"
         return output
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def post_layout(post):
+        """
+            Format a calendar entry
+        """
+
+        title = post["cms_post.body"]
+        record_id = post["cms_post_module.record"]
+        if record_id:
+            title = A(title,
+                      _href = URL(c = str(post["cms_post_module.module"]),
+                                  f = str(post["cms_post_module.resource"]), # gluon does an isinstance(str)
+                                  args = record_id,
+                                  ),
+                      _target = "_blank",
+                      )
+
+        location = post["cms_post.location_id"]
+
+        return DIV(title,
+                   BR(),
+                   location,
+                   )
 
 # END =========================================================================

@@ -60,6 +60,20 @@ class S3MainMenu(default.S3MainMenu):
 
     # -------------------------------------------------------------------------
     @classmethod
+    def menu_admin(cls, **attr):
+        """ Custom Admin Menu """
+
+        menu = super(S3MainMenu, cls).menu_admin(**attr)
+        if menu:
+            item = MM("Edit Contacts", c="cms", f="post",
+                      args = ["update"],
+                      vars = {"~.title": "Contacts"},
+                      )
+            menu.append(item)
+        return menu
+
+    # -------------------------------------------------------------------------
+    @classmethod
     def menu_modules(cls):
         """ Custom Modules Menu """
 
@@ -123,8 +137,8 @@ class S3MainMenu(default.S3MainMenu):
             # Manage Distributions inc Beneficiary Registration
             return [
                 homepage(),
-                M("Distributions", c="project", f="distribution"),
                 M("Beneficiaries", c="dvr", f="person"),
+                M("Distributions", c="project", f="distribution"),
                 homepage("gis"),
             ]
         elif has_role("ERT_LEADER"):
@@ -132,7 +146,8 @@ class S3MainMenu(default.S3MainMenu):
             return [
                 homepage(),
                 MM("Assessments", c="dc", f="target"),
-                MM("Activities", c="project", f="project"), # Activities are accessed via Projects
+                MM("Projects", c="project", f="project"),
+                MM("Activities", c="project", f="activity"),
                 MM("SitReps", c="doc", f="sitrep"),
                 MM("Documents", c="doc", f="document"),
                 homepage("gis"),
@@ -229,7 +244,8 @@ class S3OptionsMenu(default.S3OptionsMenu):
 
         return M(c="dvr")(
                     M("Beneficiaries", f="person")(
-                        M("Create", m="create"),
+                        # Do this from the Distribution
+                        #M("Create", m="create"),
                      ),
                 )
 
@@ -323,6 +339,9 @@ class S3OptionsMenu(default.S3OptionsMenu):
                      M("Partner Organizations",  f="partners")(
                         M("Create", m="create"),
                         M("Import", m="import", p="create"),
+                     ),
+                     M("Activity Types", f="activity_type")(
+                        M("Create", m="create"),
                      ),
                      M("Beneficiary Types", f="beneficiary_type")(
                         M("Create", m="create"),

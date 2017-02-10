@@ -249,6 +249,7 @@ def person():
                 resource.configure(crud_form = crud_form,
                                    filter_widgets = filter_widgets,
                                    )
+
             elif r.component_name == "allowance" and \
                  r.method in (None, "update"):
 
@@ -271,6 +272,55 @@ def person():
                             field = table[fn]
                             field.writable = False
                             field.comment = None
+
+            elif r.component_name == "evaluation":
+                S3SQLInlineComponent = s3base.S3SQLInlineComponent
+
+                crud_fields = [#"person_id",
+                               #"case_id",
+                               #"date",
+                               ]
+                cappend = crud_fields.append
+
+                table = s3db.dvr_evaluation_question
+                rows = db(table.deleted != True).select(table.id,
+                                                        table.section,
+                                                        #table.header,
+                                                        table.number,
+                                                        table.name,
+                                                        orderby = table.number,
+                                                        )
+
+                #subheadings = {}
+
+                section = None
+                for row in rows:
+                    name = "number%s" % row.number
+                    if row.section != section:
+                        label = section = row.section
+                        #subheadings[T(section)] = "sub_%sdata" % name
+                    else:
+                        label = ""
+                    cappend(S3SQLInlineComponent("data",
+                                                 name = name,
+                                                 label = label,
+                                                 fields = (("", "question_id"),
+                                                           ("", "answer"),
+                                                           ),
+                                                 filterby = dict(field = "question_id",
+                                                                 options = row.id
+                                                                 ),
+                                                 multiple = False,
+                                                 ),
+                            )
+
+                cappend("comments")
+                crud_form = s3base.S3SQLCustomForm(*crud_fields)
+
+                s3db.configure("dvr_evaluation",
+                               crud_form = crud_form,
+                               #subheadings = subheadings,
+                               )
 
         # Module-specific list fields (must be outside of r.interactive)
         list_fields = ["dvr_case.reference",
@@ -389,11 +439,41 @@ def group_membership():
                               )
 
 # -----------------------------------------------------------------------------
+def provider_type():
+    """ Provider Types for Case Activities: RESTful CRUD Controller """
+
+    return s3_rest_controller()
+
+# -----------------------------------------------------------------------------
+def activity_age_group():
+    """ Activity Age Groups: RESTful CRUD Controller """
+
+    return s3_rest_controller()
+
+# -----------------------------------------------------------------------------
+def activity_group_type():
+    """ Activity Group Types: RESTful CRUD Controller """
+
+    return s3_rest_controller()
+
+# -----------------------------------------------------------------------------
+def activity_focus():
+    """ Activity Focuses: RESTful CRUD Controller """
+
+    return s3_rest_controller()
+
+# -----------------------------------------------------------------------------
 def activity():
     """ Activities: RESTful CRUD Controller """
 
     return s3_rest_controller(rheader = s3db.dvr_rheader,
                               )
+
+# -----------------------------------------------------------------------------
+def termination_type():
+    """ Termination Types: RESTful CRUD Controller """
+
+    return s3_rest_controller()
 
 # -----------------------------------------------------------------------------
 def case_activity():
@@ -408,7 +488,7 @@ def case_activity():
                        "need_id",
                        "need_details",
                        "emergency",
-                       "referral_details",
+                       "activity_details",
                        "followup",
                        "followup_date",
                        "completed",
@@ -444,7 +524,7 @@ def due_followups():
                        "need_id",
                        "need_details",
                        "emergency",
-                       "referral_details",
+                       "activity_details",
                        "followup_date",
                        "completed",
                        ]
@@ -695,8 +775,8 @@ def case_event():
     return s3_rest_controller()
 
 # -----------------------------------------------------------------------------
-def activity_funding_reason():
-    """ Activity Funding Reasons: RESTful CRUD Controller """
+def vulnerability_type():
+    """ Vulnerability Types: RESTful CRUD Controller """
 
     return s3_rest_controller()
 
@@ -709,6 +789,81 @@ def activity_funding():
 # -----------------------------------------------------------------------------
 def site_activity():
     """ Site Activity Reports: RESTful CRUD Controller """
+
+    return s3_rest_controller()
+
+# -----------------------------------------------------------------------------
+def evaluation_question():
+    """ RESTful CRUD Controller """
+
+    return s3_rest_controller()
+
+# -----------------------------------------------------------------------------
+def evaluation():
+    """
+        RESTful CRUD Controller
+        - unused
+    """
+
+    S3SQLInlineComponent = s3base.S3SQLInlineComponent
+
+    crud_fields = ["person_id",
+                   "case_id",
+                   #"date",
+                   ]
+    cappend = crud_fields.append
+
+    table = s3db.dvr_evaluation_question
+    rows = db(table.deleted != True).select(table.id,
+                                            table.section,
+                                            #table.header,
+                                            table.number,
+                                            table.name,
+                                            orderby = table.number,
+                                            )
+
+    #subheadings = {}
+
+    section = None
+    for row in rows:
+        name = "number%s" % row.number
+        if row.section != section:
+            label = section = row.section
+            #subheadings[T(section)] = "sub_%sdata" % name
+        else:
+            label = ""
+        cappend(S3SQLInlineComponent("data",
+                                     name = name,
+                                     label = label,
+                                     fields = (("", "question_id"),
+                                               ("", "answer"),
+                                               ),
+                                     filterby = dict(field = "question_id",
+                                                     options = row.id
+                                                     ),
+                                     multiple = False,
+                                     ),
+                )
+
+    cappend("comments")
+    crud_form = s3base.S3SQLCustomForm(*crud_fields)
+
+    s3db.configure("dvr_evaluation",
+                   crud_form = crud_form,
+                   #subheadings = subheadings,
+                   )
+
+    return s3_rest_controller()
+
+# -----------------------------------------------------------------------------
+def evaluation_data():
+    """ RESTful CRUD Controller """
+
+    return s3_rest_controller()
+
+# -----------------------------------------------------------------------------
+def referral_type():
+    """ Referral Types: RESTful CRUD Controller """
 
     return s3_rest_controller()
 

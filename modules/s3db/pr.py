@@ -168,7 +168,7 @@ class S3PersonEntity(S3Model):
                            org_group = org_group_label,
                            org_facility = T("Facility"),
                            org_office = T("Office"),
-                           po_area = T("Recovery Outreach Area"),
+                           #po_area = T("Recovery Outreach Area"),
                            po_household = T("Household"),
                            police_station = T("Police Station"),
                            pr_person = T("Person"),
@@ -924,7 +924,7 @@ class S3PersonModel(S3Model):
         # Resource configuration
         self.configure(tablename,
                        crud_form = crud_form,
-                       deduplicate = self.person_deduplicate,
+                       deduplicate = self.person_duplicate,
                        filter_widgets = filter_widgets,
                        list_fields = ["id",
                                       "first_name",
@@ -1035,6 +1035,8 @@ class S3PersonModel(S3Model):
                                         "multiple": False,
                                         },
                             dvr_case_activity = "person_id",
+                            project_activity_person = "person_id",
+                            supply_distribution_person = "person_id",
                             dvr_case_appointment = "person_id",
                             dvr_case_details = {"joinby": "person_id",
                                                 "multiple": False,
@@ -1051,9 +1053,13 @@ class S3PersonModel(S3Model):
                             dvr_economy = {"joinby": "person_id",
                                            "multiple": False,
                                            },
+                            dvr_evaluation = {"joinby": "person_id",
+                                              "multiple": False,
+                                              },
                             dvr_household = {"joinby": "person_id",
                                              "multiple": False,
                                              },
+                            dvr_household_member = "person_id",
                             dvr_note = {"name": "case_note",
                                         "joinby": "person_id",
                                         },
@@ -1243,19 +1249,32 @@ class S3PersonModel(S3Model):
                                 utable.last_name,
                                 limitby=(0, 1)).first()
 
-        # If there is a user and their first or last name have changed
-        if user and form_vars.first_name and \
-           (user.first_name != form_vars.first_name or \
-            user.last_name != form_vars.last_name):
-            # Update the user record
-            query = (utable.id == user.id)
-            db(query).update(first_name = form_vars.first_name,
-                             last_name = form_vars.last_name,
-                             )
+        # If there is a user and their first or other name have changed
+        if user:
+            middle_as_last = current.deployment_settings.get_L10n_mandatory_middlename()
+            if middle_as_last:
+                # RMSAmericas: Map the Person's middle_name to the User's last_name
+                if form_vars.first_name and \
+                   (user.first_name != form_vars.first_name or \
+                   user.last_name != form_vars.middle_name):
+                    # Update the user record
+                    query = (utable.id == user.id)
+                    db(query).update(first_name = form_vars.first_name,
+                                     last_name = form_vars.middle_name,
+                                     )
+            else:
+                if form_vars.first_name and \
+                   (user.first_name != form_vars.first_name or \
+                   user.last_name != form_vars.last_name):
+                    # Update the user record
+                    query = (utable.id == user.id)
+                    db(query).update(first_name = form_vars.first_name,
+                                     last_name = form_vars.last_name,
+                                     )
 
     # -------------------------------------------------------------------------
     @staticmethod
-    def person_deduplicate(item):
+    def person_duplicate(item):
         """ Import item deduplication """
 
         db = current.db
@@ -1267,13 +1286,16 @@ class S3PersonModel(S3Model):
             # Just look at this
             table = item.table
             query = (table.pe_label == pe_label)
-            duplicate = current.db(query).select(table.id,
-                                                 limitby=(0, 1)).first()
+            duplicate = db(query).select(table.id,
+                                         limitby=(0, 1)).first()
             if duplicate:
                 item.id = duplicate.id
                 item.method = item.METHOD.UPDATE
 
             return
+
+        settings = current.deployment_settings
+        middle_mandatory = settings.get_L10n_mandatory_middlename()
 
         ptable = db.pr_person
         # Mandatory data
@@ -1292,7 +1314,10 @@ class S3PersonModel(S3Model):
 
         # @ToDo: Allow each name to be split into words in a different order
         # - see pr_search_ac
-        if fname and lname:
+        if middle_mandatory and fname and mname:
+            query = (ptable.first_name.lower() == fname) & \
+                    (ptable.middle_name.lower() == mname)
+        elif fname and lname:
             query = (ptable.first_name.lower() == fname) & \
                     (ptable.last_name.lower() == lname)
         elif fname and mname:
@@ -1367,7 +1392,7 @@ class S3PersonModel(S3Model):
         def rank(a, b, match, mismatch):
             return match if a == b else mismatch
 
-        email_required = current.deployment_settings.get_pr_import_update_requires_email()
+        email_required = settings.get_pr_import_update_requires_email()
         for row in candidates:
             if fname and (lname or mname):
                 row_fname = row[ptable.first_name]
@@ -1392,12 +1417,21 @@ class S3PersonModel(S3Model):
             if mname:
                 if row_mname:
                     check += rank(mname, row_mname.lower(), +2, -2)
+                #elif middle_mandatory:
+                #    check -= 2
                 else:
                     # Don't penalise hard if the new source doesn't include the middle name
                     check -= 1
 
-            if lname and row_lname:
-                check += rank(lname, row_lname.lower(), +2, -2)
+            if lname:
+                if row_lname:
+                    check += rank(lname, row_lname.lower(), +2, -2)
+                #elif middle_mandatory:
+                #    # Don't penalise if the new source doesn't include the last name
+                #    pass
+                #else:
+                #    # Don't penalise hard if the new source doesn't include the last name
+                #    check -= 1
 
             if initials and row_initials:
                 check += rank(initials, row_initials.lower(), +4, -1)
@@ -3061,8 +3095,7 @@ class S3AddressModel(S3Model):
             msg_list_empty = T("There is no address for this person yet. Add new address.")
             )
 
-        list_fields = ["id",
-                       "type",
+        list_fields = ["type",
                        (T("Address"), "location_id$addr_street"),
                        ]
 
@@ -3434,7 +3467,8 @@ class S3PersonImageModel(S3Model):
                           self.super_link("pe_id", "pr_pentity"),
                           Field("profile", "boolean",
                                 default = False,
-                                label = T("Profile Picture?")
+                                label = T("Profile Picture?"),
+                                represent = s3_yes_no_represent,
                                 ),
                           Field("image", "upload",
                                 autodelete = True,
@@ -3712,7 +3746,6 @@ class S3PersonIdentityModel(S3Model):
     def model(self):
 
         T = current.T
-        messages = current.messages
 
         # ---------------------------------------------------------------------
         # Identity
@@ -3782,6 +3815,14 @@ class S3PersonIdentityModel(S3Model):
                                 ),
                           #Field("ia_subdivision"), # Name of issuing authority subdivision
                           #Field("ia_code"), # Code of issuing authority (if any)
+                          Field("image", "upload",
+                                autodelete = True,
+                                label = T("Scanned Copy"),
+                                length = current.MAX_FILENAME_LENGTH,
+                                # upload folder needs to be visible to the download() function as well as the upload
+                                uploadfolder = os.path.join(current.request.folder,
+                                                            "uploads"),
+                               ),
                           s3_comments(),
                           *s3_meta_fields())
 
@@ -3990,8 +4031,7 @@ class S3PersonEducationModel(S3Model):
                                                        ),
                                             ignore_deleted = True,
                                             ),
-                  list_fields = ["id",
-                                 # Normally accessed via component
+                  list_fields = [# Normally accessed via component
                                  #"person_id",
                                  "year",
                                  "level_id",
@@ -4021,6 +4061,7 @@ class S3PersonDetailsModel(S3Model):
 
         T = current.T
         gis = current.gis
+        settings = current.deployment_settings
         messages = current.messages
         NONE = messages["NONE"]
         UNKNOWN_OPT = messages.UNKNOWN_OPT
@@ -4047,8 +4088,8 @@ class S3PersonDetailsModel(S3Model):
             3: T("literate"),
         }
 
-        # Religion Options
-        religion_opts = current.deployment_settings.get_L10n_religions()
+        # Language Options
+        languages = settings.get_L10n_languages()
 
         # Nationality Options
         STATELESS = T("Stateless")
@@ -4060,11 +4101,19 @@ class S3PersonDetailsModel(S3Model):
                                         gis.get_country(code, key_type="code") or \
                                         UNKNOWN_OPT
 
+        # Religion Options
+        religion_opts = settings.get_L10n_religions()
+
         tablename = "pr_person_details"
         self.define_table(tablename,
                           self.pr_person_id(label = T("Person"),
                                             ondelete = "CASCADE",
                                             ),
+                          Field("language", length=16,
+                                represent = lambda opt: \
+                                    languages.get(opt, UNKNOWN_OPT),
+                                requires = IS_EMPTY_OR(IS_IN_SET(languages)),
+                                ),
                           Field("nationality",
                                 label = T("Nationality"),
                                 represent = nationality_repr,
@@ -4233,7 +4282,7 @@ class S3PersonTagModel(S3Model):
 
         tablename = "pr_person_tag"
         self.define_table(tablename,
-                          self.pr_person_id(),
+                          self.pr_person_id(ondelete = "CASCADE"),
                           Field("tag",
                                 label = T("Key"),
                                 ),
@@ -6865,12 +6914,13 @@ def pr_human_resource_update_affiliations(person_id):
 
     # Add affiliations to all masters which are not in current affiliations
     #vol_role = current.deployment_settings.get_hrm_vol_affiliation() or OTHER_ROLE
+    role_type = OU
     for role in masters:
-        if role == VOLUNTEER:
-            #role_type = vol_role
-            role_type = OTHER_ROLE
-        else:
-            role_type = OU
+        #if role == VOLUNTEER:
+        #    #role_type = vol_role
+        #    role_type = OTHER_ROLE
+        #else:
+        #    role_type = OU
         for m in masters[role]:
             pr_add_affiliation(m, pe_id, role=role, role_type=role_type)
 

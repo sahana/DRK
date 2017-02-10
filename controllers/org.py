@@ -126,6 +126,8 @@ def sites_for_org():
     """
         Used to provide the list of Sites for an Organisation
         - used in User Registration & Assets
+
+        Access via the .json representation to avoid work rendering menus, etc
     """
 
     try:
@@ -243,7 +245,7 @@ def capacity_assessment():
                                             orderby = table.number,
                                             )
 
-    subheadings = {}
+    #subheadings = {}
 
     section = None
     for row in rows:
@@ -271,7 +273,7 @@ def capacity_assessment():
 
     s3db.configure("org_capacity_assessment",
                    crud_form = crud_form,
-                   subheadings = subheadings,
+                   #subheadings = subheadings,
                    )
 
     return s3_rest_controller()
@@ -468,6 +470,8 @@ def facility_geojson():
         Create GeoJSON[P] of Facilities for use by a high-traffic website
         - controller just for testing
         - function normally run on a schedule
+
+        Access via the .json representation to avoid work rendering menus, etc
     """
 
     s3db.org_facility_geojson()

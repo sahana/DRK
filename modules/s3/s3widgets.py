@@ -1690,7 +1690,7 @@ class S3CalendarWidget(FormWidget):
             #    # Urdu uses Arabic
             #    language = "ar"
             if "-" in language:
-                parts = language.split("_", 1)
+                parts = language.split("-", 1)
                 language = "%s-%s" % (parts[0], parts[1].upper())
 
             # datePicker regional
@@ -2569,7 +2569,9 @@ class S3GroupedOptionsWidget(FormWidget):
                  help_field=None,
                  none=None,
                  sort=True,
-                 orientation=None):
+                 orientation=None,
+                 table=True,
+                 ):
         """
             Constructor
 
@@ -2586,6 +2588,7 @@ class S3GroupedOptionsWidget(FormWidget):
             @param none: True to render "None" as normal option
             @param sort: sort the options (only effective if size==None)
             @param orientation: the ordering orientation, "columns"|"rows"
+            @param table: whether to render options inside a table or not
         """
 
         self.options = options
@@ -2596,6 +2599,7 @@ class S3GroupedOptionsWidget(FormWidget):
         self.none = none
         self.sort = sort
         self.orientation = orientation
+        self.table = table
 
     # -------------------------------------------------------------------------
     def __call__(self, field, value, **attributes):
@@ -2633,9 +2637,10 @@ class S3GroupedOptionsWidget(FormWidget):
 
         widget.add_class("groupedopts-widget")
         widget_opts = {"columns": self.cols,
-                       "emptyText": str(current.T("No options available")),
+                       "emptyText": s3_str(current.T("No options available")),
                        "orientation": self.orientation or "columns",
                        "sort": self.sort,
+                       "table": self.table,
                        }
         script = '''$('#%s').groupedopts(%s)''' % \
                  (_id, json.dumps(widget_opts, separators=SEPARATORS))
@@ -5112,7 +5117,7 @@ class S3LocationSelector(S3Selector):
         if show_address:
             address = values.get("address")
             if show_address is True:
-                label = T("Street Address")
+                label = gtable.addr_street.label
             else:
                 label = show_address
             components["address"] = manual_input(fieldname,
@@ -7913,14 +7918,15 @@ class S3TimeIntervalWidget(FormWidget):
 # =============================================================================
 class S3UploadWidget(UploadWidget):
     """
-        Subclassed to not show the delete checkbox when field is mandatory
-            - This now been included as standard within Web2Py from r2867
-            - Leaving this unused example in the codebase so that we can easily
-              amend this if we wish to later
+        Subclass for use in inline-forms
+
+        - always renders all widget elements (even when empty), so that
+          they can be updated from JavaScript
+        - adds CSS selectors for widget elements
     """
 
-    @staticmethod
-    def widget(field, value, download_url=None, **attributes):
+    @classmethod
+    def widget(cls, field, value, download_url=None, **attributes):
         """
         generates a INPUT file tag.
 
@@ -7933,33 +7939,77 @@ class S3UploadWidget(UploadWidget):
 
         """
 
-        default=dict(
-            _type="file",
-            )
-        attr = UploadWidget._attributes(field, default, **attributes)
+        T = current.T
 
-        inp = INPUT(**attr)
+        # File input
+        default = {"_type": "file",
+                   }
+        attr = cls._attributes(field, default, **attributes)
 
+        # File URL
+        base_url = "/default/download"
         if download_url and value:
-            url = "%s/%s" % (download_url, value)
-            (br, image) = ("", "")
-            if UploadWidget.is_image(value):
-                br = BR()
-                image = IMG(_src = url, _width = UploadWidget.DEFAULT_WIDTH)
-
-            requires = attr["requires"]
-            if requires == [] or isinstance(requires, IS_EMPTY_OR):
-                inp = DIV(inp, "[",
-                          A(UploadWidget.GENERIC_DESCRIPTION, _href = url),
-                          "|",
-                          INPUT(_type="checkbox",
-                                _name=field.name + UploadWidget.ID_DELETE_SUFFIX),
-                          UploadWidget.DELETE_FILE,
-                          "]", br, image)
+            if callable(download_url):
+                url = download_url(value)
             else:
-                inp = DIV(inp, "[",
-                          A(UploadWidget.GENERIC_DESCRIPTION, _href = url),
-                          "]", br, image)
+                base_url = download_url
+                url = download_url + "/" + value
+        else:
+            url = None
+
+        # Download-link
+        link = SPAN("[",
+                    A(T(cls.GENERIC_DESCRIPTION),
+                      _href = url,
+                      ),
+                    _class = "s3-upload-link",
+                    _style = "white-space:nowrap",
+                    )
+
+        # Delete-checkbox
+        requires = attr["requires"]
+        if requires == [] or isinstance(requires, IS_EMPTY_OR):
+            name = field.name + cls.ID_DELETE_SUFFIX
+            delete_checkbox = TAG[""]("|",
+                                      INPUT(_type = "checkbox",
+                                            _name = name,
+                                            _id = name,
+                                            ),
+                                      LABEL(T(cls.DELETE_FILE),
+                                            _for = name,
+                                            _style = "display:inline",
+                                            ),
+                                      )
+            link.append(delete_checkbox)
+
+        # Complete link-element
+        link.append("]")
+        if not url:
+            link.add_class("hide")
+
+        # Image preview
+        preview_class = "s3-upload-preview"
+        if value and cls.is_image(value):
+            preview_url = url
+        else:
+            preview_url = None
+            preview_class = "%s hide" % preview_class
+        image = DIV(IMG(_alt = T("Loading"),
+                        _src = preview_url,
+                        _width = cls.DEFAULT_WIDTH,
+                        ),
+                    _class = preview_class,
+                    )
+
+        # Construct the widget
+        inp = DIV(INPUT(**attr),
+                  link,
+                  image,
+                  _class="s3-upload-widget",
+                  data = {"base": base_url,
+                          },
+                  )
+
         return inp
 
 # =============================================================================

@@ -149,12 +149,15 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("All Beneficiaries", vars = {}),
                         M(follow_up_label, f="due_followups"),
                         ),
-                    M("Activities", link=False)(
-                        M("Psychosocial Support", f="activity",
-                          vars={"service_type": "PSS"},
+                    M("Activities", link=False,
+                      restrict = ("GROUP_ACTIVITIES", "MENTAL_HEALTH"))(
+                        M("Group Activities", f="activity",
+                          vars = {"service_type": "PSS"},
+                          restrict = ("GROUP_ACTIVITIES",),
                           ),
                         M("Mental Health Support", f="activity",
                           vars={"service_type": "MH"},
+                          restrict = ("MENTAL_HEALTH",),
                           ),
                         ),
                     M("Archive", link=False)(
@@ -166,12 +169,19 @@ class S3OptionsMenu(default.S3OptionsMenu):
                           ),
                         ),
                     M("Administration", c="dvr", link=False,
-                      restrict = [ADMIN])(
+                      restrict = (ADMIN, "ORG_ADMIN"))(
                         M("Beneficiary Types", f="beneficiary_type"),
+                        #M("Evaluation Questions", f="evaluation_question"),
                         M("Housing Types", f="housing_type"),
                         M("Income Sources", f="income_source"),
-                        M("Need Types", f="need"),
-                        M("SNF Justifications", f="activity_funding_reason"),
+                        M("Need Types", f="need", m="hierarchy"),
+                        M("Referral Types", f="referral_type"),
+                        M("Vulnerability Types", f="Vulnerability_type"),
+                        M("Activity Group Types", f="activity_group_type"),
+                        M("Activity Age Groups", f="activity_age_group"),
+                        M("Provider Types", f="provider_type"),
+                        M("Activity Focuses", f="activity_focus"),
+                        M("Termination Types", f="termination_type"),
                         ),
                 )
 
@@ -205,7 +215,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                        #M("Import", m="import"),
                     ),
                     M("Administration", c=("org", "project"), link=False,
-                      restrict = [ADMIN])(
+                      restrict = (ADMIN, "ORG_ADMIN"))(
                         M("Organization Types", f="organisation_type"),
                         M("Service Types", f="service"),
                         M("Facility Types", f="facility_type"),

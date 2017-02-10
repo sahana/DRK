@@ -513,6 +513,8 @@ def config(settings):
     #settings.dvr.activity_types = True
     # Uncomment this to use hierarchical case activity types
     #settings.dvr.activity_types_hierarchical = True
+    # Uncomment this if Case activities use multiple Needs
+    #settings.dvr.case_activity_needs_multiple = True
     # Uncomment this to use service types for needs
     #settings.dvr_needs_use_service_type = True
     # Uncomment this to use hierarchical need types
@@ -882,8 +884,12 @@ def config(settings):
     #settings.project.mode_drr = True
     # Uncomment this to use settings suitable for detailed Task management
     #settings.project.mode_task = True
+    # Uncomment this to use link Projects to Events
+    #settings.project.event_projects = True
     # Uncomment this to use Activities for Projects & Tasks
     #settings.project.activities = True
+    # Uncomment this to use link Activities to Events
+    #settings.project.event_activities = True
     # Uncomment this to use Activity Types for Activities & Projects
     #settings.project.activity_types = True
     # Uncomment this to filter dates in Activities
@@ -964,6 +970,8 @@ def config(settings):
     #settings.mobile.forms = [
     #    ("Beneficiaries", "pr_person", {"c": "dvr", "f": "person"}),
     #]
+    # Disable mobile forms for dynamic tables:
+    #settings.mobile.dynamic_tables = False
 
     # -----------------------------------------------------------------------------
     # XForms

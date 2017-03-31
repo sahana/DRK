@@ -119,6 +119,11 @@ def config(settings):
     settings.cms.hide_index = True
 
     # -------------------------------------------------------------------------
+    # Human Resource Module Settings
+    #
+    settings.hrm.teams_orgs = False
+
+    # -------------------------------------------------------------------------
     # Inventory Module Settings
     #
     settings.inv.facility_label = "Facility"
@@ -159,6 +164,7 @@ def config(settings):
                                          }
 
     settings.project.task_time = False
+    settings.project.my_tasks_include_team_tasks = True
 
     # -------------------------------------------------------------------------
     # Requests Module Settings
@@ -174,6 +180,10 @@ def config(settings):
     settings.cr.shelter_population_dynamic = True
     settings.cr.shelter_housing_unit_management = True
     settings.cr.check_out_is_final = False
+
+    # Generate tasks for shelter inspections
+    settings.cr.shelter_inspection_tasks = True
+    settings.cr.shelter_inspection_task_active_statuses = (2, 3, 6)
 
     # -------------------------------------------------------------------------
     def profile_header(r):
@@ -730,6 +740,11 @@ def config(settings):
                 if isinstance(output, dict):
                     output["rheader"] = ""
 
+            # Custom view for shelter inspection
+            if r.method == "inspection":
+               from s3 import S3CustomController
+               S3CustomController._view("DRK", "shelter_inspection.html")
+
             return output
         s3.postp = custom_postp
 
@@ -1033,6 +1048,13 @@ def config(settings):
                 # Restricted view for Security staff
                 if r.component:
                     redirect(r.url(method=""))
+
+                # Autocomplete using alternative search method
+                search_fields = ("first_name", "last_name", "pe_label")
+                s3db.set_method("pr", "person",
+                                method = "search_ac",
+                                action = s3db.pr_PersonSearchAutocomplete(search_fields),
+                                )
 
                 current.deployment_settings.ui.export_formats = None
 
@@ -2705,24 +2727,75 @@ def config(settings):
 
         db = current.db
         s3db = current.s3db
+
+        # Configure custom form for tasks
+        from s3 import S3SQLCustomForm, S3SQLInlineLink
+        crud_form = S3SQLCustomForm("name",
+                                    "status",
+                                    "priority",
+                                    "description",
+                                    "source",
+                                    S3SQLInlineLink("shelter_inspection_flag",
+                                                    field="inspection_flag_id",
+                                                    label=T("Shelter Inspection"),
+                                                    readonly=True,
+                                                    render_list=True,
+                                                    ),
+                                    "pe_id",
+                                    "date_due",
+                                    )
+        s3db.configure("project_task",
+                       crud_form = crud_form,
+                       )
+
+        # Filter assignees to human resources
         htable = s3db.hrm_human_resource
         ptable = s3db.pr_person
         query = (htable.deleted == False) & \
                 (htable.person_id == ptable.id)
-        hrs = db(query).select(ptable.pe_id)
-        hrs = [hr.pe_id for hr in hrs]
+        rows = db(query).select(ptable.pe_id)
+        pe_ids = set(row.pe_id for row in rows)
+
+        # ...and teams
+        gtable = s3db.pr_group
+        query = (gtable.group_type == 3) & \
+                (gtable.deleted == False)
+        rows = db(query).select(gtable.pe_id)
+        pe_ids |= set(row.pe_id for row in rows)
 
         from gluon import IS_EMPTY_OR
         s3db.project_task.pe_id.requires = IS_EMPTY_OR(
             IS_ONE_OF(db, "pr_pentity.pe_id",
                       s3db.pr_PersonEntityRepresent(show_label = False,
-                                                    show_type = False),
-                      sort=True,
+                                                    show_type = True,
+                                                    ),
+                      sort = True,
                       filterby = "pe_id",
-                      filter_opts = hrs,
+                      filter_opts = pe_ids,
                       ))
 
     settings.customise_project_task_resource = customise_project_task_resource
+
+    # -------------------------------------------------------------------------
+    def customise_security_seized_item_resource(r, tablename):
+        """
+            Custom restrictions in seized items form
+        """
+
+        table = current.s3db.security_seized_item
+
+        field = table.person_id
+        field.comment = T("Enter some characters of the ID or name to start the search, then select from the drop-down")
+
+        # Can't add item type from item form
+        field = table.item_type_id
+        field.comment = None
+
+        # Confiscated by not writable (always default)
+        field = table.confiscated_by
+        field.writable = False
+
+    settings.customise_security_seized_item_resource = customise_security_seized_item_resource
 
     # -------------------------------------------------------------------------
     # Comment/uncomment modules here to disable/enable them
@@ -3042,6 +3115,7 @@ def drk_dvr_rheader(r, tabs=[]):
                             (T("Events"), "case_event"),
                             (T("Photos"), "image"),
                             (T("Notes"), "case_note"),
+                            (T("Confiscation"), "seized_item"),
                             ]
 
                 case = resource.select(["dvr_case.status_id",

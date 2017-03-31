@@ -23,6 +23,7 @@ def config(settings):
 
     # Theme (folder to use for views/layout.html)
     settings.base.theme = "SCPHIMS"
+    settings.ui.menu_logo = "/%s/static/themes/SCPHIMS/img/logo.png" % current.request.application
 
     # Authentication settings
     # Users use their existing SC accounts
@@ -227,8 +228,9 @@ def config(settings):
 
         # Always at L3
         from s3 import S3LocationSelector
-        table.location_id.widget = S3LocationSelector(levels=("L1", "L2", "L3"),
-                                                      show_map=False)
+        table.location_id.widget = S3LocationSelector(levels = ("L1", "L2", "L3"),
+                                                      show_map = False,
+                                                      )
 
         has_role = current.auth.s3_has_role
         if has_role("ERT_LEADER") or has_role("HUM_MANAGER"):
@@ -258,17 +260,21 @@ def config(settings):
     settings.customise_dc_target_resource = customise_dc_target_resource
 
     # -------------------------------------------------------------------------
-    def customise_dc_collection_resource(r, tablename):
+    def customise_dc_response_resource(r, tablename):
 
         # @ToDo: Filters inc 'Assigned to me'
 
         db = current.db
         s3db = current.s3db
-        table = s3db.dc_collection
+        table = s3db.dc_response
+
+        table.person_id.label = T("Name of team leader")
 
         # Always at L4
         from s3 import S3LocationSelector
-        table.location_id.widget = S3LocationSelector(levels=("L1", "L2", "L3", "L4"))
+        table.location_id.widget = S3LocationSelector(levels = ("L1", "L2", "L3", "L4"),
+                                                      show_map = False,
+                                                      )
 
         # Always SC
         otable = s3db.org_organisation
@@ -299,7 +305,32 @@ def config(settings):
                 # Prepop not done
                 current.log.warning("Cannot default Targets to Rapid Assessment form")
 
-    settings.customise_dc_collection_resource = customise_dc_collection_resource
+    settings.customise_dc_response_resource = customise_dc_response_resource
+
+    # -------------------------------------------------------------------------
+    def customise_dc_response_controller(**attr):
+
+        # When creating Assessments from Assessments module, include the Event field
+        from s3 import S3SQLCustomForm, S3SQLInlineLink
+        crud_form = S3SQLCustomForm(S3SQLInlineLink("event",
+                                                    label = T("Disaster"),
+                                                    field = "event_id",
+                                                    multiple = False,
+                                                    ),
+                                    "template_id",
+                                    "date",
+                                    "location_id",
+                                    "person_id",
+                                    "comments",
+                                    )
+
+        current.s3db.configure("dc_response",
+                               crud_form = crud_form,
+                               )
+
+        return attr
+
+    settings.customise_dc_response_controller = customise_dc_response_controller
 
     # =========================================================================
     # Documents

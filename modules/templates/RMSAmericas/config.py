@@ -1265,8 +1265,11 @@ def config(settings):
         from gluon import URL
         from s3 import s3_redirect_default
 
-        mode = current.session.s3.hrm.mode
-        if mode is not None:
+        has_role = current.auth.s3_has_role
+        len_roles = len(current.session.s3.roles)
+        if (len_roles <= 2) or \
+           (len_roles == 3 and has_role("RIT_MEMBER") and not has_role("ADMIN")):
+            # No specific Roles
             # Go to Personal Profile
             s3_redirect_default(URL(f="person"))
         else:
@@ -1596,7 +1599,7 @@ Thank you"""
             if callable(standard_postp):
                 output = standard_postp(r, output)
 
-            if r.method in (None, "create"):
+            if r.method in (None, "create") and isinstance(output, dict):
                 form = output.get("form")
                 if form:
                     add_language(form)

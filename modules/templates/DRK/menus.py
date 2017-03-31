@@ -54,11 +54,13 @@ class S3MainMenu(default.S3MainMenu):
                    args = [shelter_id, "check-in"],
                    check = shelter_id is not None,
                    ),
+                MM("Confiscation", c="security", f="seized_item"),
             ]
 
         elif not_admin and has_role("QUARTIER"):
             return [
                 MM("Residents", c=("dvr", "cr"), f=("person", "shelter_registration")),
+                MM("Confiscation", c="security", f="seized_item"),
             ]
 
         else:
@@ -94,6 +96,8 @@ class S3MainMenu(default.S3MainMenu):
                     MM("Facilities", c="org", f="facility"),
                     #homepage("req"),
                     homepage("inv"),
+                    SEP(link=False),
+                    MM("Confiscation", c="security", f="seized_item"),
                     SEP(link=False),
                     MM("Surplus Meals", c="default", f="index",
                        args = "surplus_meals",
@@ -208,7 +212,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
         if not shelter_id:
             return None
 
-        #ADMIN = current.session.s3.system_roles.ADMIN
+        ADMIN = current.auth.get_system_roles().ADMIN
 
         return M(c="cr")(
                     M("Shelter", f="shelter", args=[shelter_id])(
@@ -220,6 +224,22 @@ class S3OptionsMenu(default.S3OptionsMenu):
                           args = [shelter_id, "shelter_unit"],
                           ),
                     ),
+                    #M("Room Inspection", f = "shelter", link=False)(
+                    #      M("Register",
+                    #        args = [shelter_id, "inspection"],
+                    #        t = "cr_shelter_inspection",
+                    #        p = "create",
+                    #        ),
+                    #      M("Overview", f = "shelter_inspection"),
+                    #      M("Defects", f = "shelter_inspection_flag"),
+                    #      ),
+                    #M("Administration",
+                    #  link = False,
+                    #  restrict = (ADMIN, "ADMIN_HEAD"),
+                    #  selectable=False,
+                    #  )(
+                    #    M("Shelter Flags", f="shelter_flag"),
+                    #    ),
                 )
 
     # -------------------------------------------------------------------------
@@ -337,6 +357,18 @@ class S3OptionsMenu(default.S3OptionsMenu):
                     M("Create", m="create"),
                     M("My Open Tasks", vars={"mine":1}),
                  ),
+                )
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def security():
+        """ SECURITY / Security Management """
+
+        return M(c="security")(
+                M("Confiscation", f="seized_item")(
+                    M("Create", m="create"),
+                    M("Item Types", f="seized_item_type"),
+                    ),
                 )
 
 # END =========================================================================

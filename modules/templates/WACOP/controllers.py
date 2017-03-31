@@ -4,7 +4,7 @@ from gluon import current, SQLFORM
 from gluon.html import *
 from gluon.storage import Storage
 from gluon.utils import web2py_uuid
-from s3 import s3_str, FS, ICON, S3CRUD, S3CustomController, S3DateFilter, S3DateTime, S3FilterForm, S3OptionsFilter, S3TextFilter, S3URLQuery
+from s3 import s3_str, FS, ICON, S3CRUD, S3CustomController, S3DateFilter, S3DateTime, S3FilterForm, S3OptionsFilter, S3Request, S3TextFilter, S3URLQuery
 
 THEME = "WACOP"
 
@@ -14,52 +14,75 @@ class index(S3CustomController):
 
     def __call__(self):
 
-        output = {}
+        T = current.T
 
-        # Allow editing of page content from browser using CMS module
-        if current.deployment_settings.has_module("cms"):
-            system_roles = current.auth.get_system_roles()
-            ADMIN = system_roles.ADMIN in current.session.s3.roles
-            s3db = current.s3db
-            table = s3db.cms_post
-            ltable = s3db.cms_post_module
-            module = "default"
-            resource = "index"
-            query = (ltable.module == module) & \
-                    ((ltable.resource == None) | \
-                     (ltable.resource == resource)) & \
-                    (ltable.post_id == table.id) & \
-                    (table.deleted != True)
-            item = current.db(query).select(table.body,
-                                            table.id,
-                                            limitby=(0, 1)).first()
-            if item:
-                if ADMIN:
-                    item = DIV(XML(item.body),
-                               BR(),
-                               A(current.T("Edit"),
-                                 _href=URL(c="cms", f="post",
-                                           args=[item.id, "update"]),
-                                 _class="action-btn"))
-                else:
-                    item = DIV(XML(item.body))
-            elif ADMIN:
-                if current.response.s3.crud.formstyle == "bootstrap":
-                    _class = "btn"
-                else:
-                    _class = "action-btn"
-                item = A(current.T("Edit"),
-                         _href=URL(c="cms", f="post", args="create",
-                                   vars={"module": module,
-                                         "resource": resource
-                                         }),
-                         _class="%s cms-edit" % _class)
-            else:
-                item = ""
-        else:
-            item = ""
-        output["item"] = item
+        custom = custom_WACOP()
 
+        # Alerts Cards
+        alerts = custom._alerts_html()
+
+        # Events Cards
+        events = custom._events_html()
+
+        # Map of Incidents
+        ltable = current.s3db.gis_layer_feature
+        layer = current.db(ltable.name == "Incidents").select(ltable.layer_id,
+                                                              limitby=(0, 1)
+                                                              ).first()
+        try:
+            layer_id = layer.layer_id
+        except:
+            # No prepop done?
+            layer_id = None
+        feature_resources = [{"name"     : T("Incidents"),
+                              "id"       : "search_results",
+                              "layer_id" : layer_id,
+                              },
+                             ]
+        map = current.gis.show_map(height = 350,
+                                   width = 425,
+                                   collapsed = True,
+                                   callback='''S3.search.s3map()''',
+                                   feature_resources = feature_resources,
+                                   )
+
+        # Output
+        output = {"alerts": alerts,
+                  "events": events,
+                  "map": map,
+                  }
+
+        # Incidents dataTable
+        dtargs = {"dt_pagination": False,
+                  "dt_pageLength": 10,
+                  "dt_pagination": False,
+                  "dt_searching": False,
+                  #"dt_lengthMenu": None,
+                  }
+        current.response.s3.no_formats = True
+
+        custom._datatable(r = S3Request("event", "incident"),
+                          output = output,
+                          dtargs = dtargs,
+                          dt_init = None,
+                          incident_id = None,
+                          updateable = False,
+                          start = 0,
+                          limit = 10,
+                          tablename = "event_incident",
+                          list_fields = ["name",
+                                         (T("Type"), "incident_type_id"),
+                                         # @ToDo: VirtualField
+                                         #"status",
+                                         "location_id",
+                                         (T("Start"), "date"),
+                                         ],
+                          orderby = "event_incident.name",
+                          )
+
+        s3 = current.response.s3
+        s3.scripts.append("/%s/static/themes/WACOP/js/bookmarks.js" % current.request.application)
+        s3.jquery_ready.append('''wacop_bookmarks()''')
         self._view(THEME, "index.html")
         return output
 
@@ -243,10 +266,11 @@ class custom_WACOP(S3CRUD):
 
         list_id = "custom-list-%s" % tablename
 
-        # Move the search boxes into the design
-        dt_init.append('''$('#dt-%(tablename)s .dataTables_filter').prependTo($('#dt-search-%(tablename)s'));$('#dt-search-%(tablename)s .dataTables_filter input').attr('placeholder','Enter search term…').attr('name','%(tablename)s-search').prependTo($('#dt-search-%(tablename)s .dataTables_filter'));$('.custom-list-%(tablename)s_length').hide();''' % \
-            dict(tablename = tablename))
-        current.deployment_settings.ui.datatables_initComplete = "".join(dt_init)
+        if dt_init:
+            # Move the search boxes into the design
+            dt_init.append('''$('#dt-%(tablename)s .dataTables_filter').prependTo($('#dt-search-%(tablename)s'));$('#dt-search-%(tablename)s .dataTables_filter input').attr('placeholder','Enter search term…').attr('name','%(tablename)s-search').prependTo($('#dt-search-%(tablename)s .dataTables_filter'));$('.custom-list-%(tablename)s_length').hide();''' % \
+                dict(tablename = tablename))
+            current.deployment_settings.ui.datatables_initComplete = "".join(dt_init)
 
         # Get the data table
         dt, totalrows, ids = resource.datatable(fields=list_fields,
@@ -342,6 +366,408 @@ class custom_WACOP(S3CRUD):
         output["%s_datatable" % tablename] = DIV(contents,
                                                  _class="card-holder",
                                                  )
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _alerts_html():
+        """
+            Create the HTML for the Alerts section
+        """
+
+        T = current.T
+        db = current.db
+        s3db = current.s3db
+
+        tablename = "cms_post"
+        resource = s3db.resource(tablename)
+        resource.add_filter(FS("~.series_id$name") == "Public Alert")
+        # @ToDo: Just show Open Alerts?
+
+        list_fields = [#"priority",
+                       "id",
+                       "status_id",
+                       "date",
+                       "title",
+                       "body",
+                       "created_by",
+                       "location_id$path",
+                       "location_id$L3",
+                       "location_id$lat",
+                       "location_id$lon",
+                       ]
+        rows = resource.select(fields=list_fields,
+                               start=None,
+                               limit=4,
+                               orderby="date desc",
+                               represent=True,
+                               raw_data=True,
+                               ).rows
+        if len(rows) == 0:
+            # Section won't be visible at all
+            alerts = ""
+        else:
+            # Render the list
+            alerts = DIV(H3("Alerts ",
+                            TAG["small"](A(T("See all alerts"),
+                                           _href=URL(c="cms", f="post",
+                                                     args="summary",
+                                                     ),
+                                           ),
+                                         ),
+                            _class="well-title",
+                            ),
+                         _class="row well blue",
+                         )
+            gttable = s3db.gis_location_tag
+            auth = current.auth
+            if auth.is_logged_in():
+                logged_in = True
+                user_id = auth.user.id
+                btable = s3db.cms_post_user
+                bquery = (btable.post_id.belongs([row["cms_post.id"] for row in rows])) & \
+                         (btable.deleted == False)
+                bookmarks = db(bquery).select(btable.post_id)
+                bookmarks = [b.post_id for b in bookmarks]
+            else:
+                logged_in = False
+            for row in rows:
+                record_id = row["cms_post.id"]
+                status = row["cms_post.status_id"]
+                post_dt = row._row["cms_post.date"]
+                post_date = post_dt.date().strftime("%b %d, %Y")
+                post_time = post_dt.time().strftime("%H:%M")
+                if logged_in:
+                    if record_id in bookmarks:
+                        bookmark = LI(ICON("bookmark"),
+                                      _title=T("Remove Bookmark"),
+                                      _class="item bookmark",
+                                      )
+                    else:
+                        bookmark = LI(ICON("bookmark-empty"),
+                                      _title=T("Add Bookmark"),
+                                      _class="item bookmark",
+                                      )
+                    bookmark["_data-c"] = "cms"
+                    bookmark["_data-f"] = "post"
+                    bookmark["_data-i"] = record_id
+                else:
+                    bookmark = ""
+                path = row._row["gis_location.path"]
+                if path:
+                    L1 = path.split("/")[1]
+                    query = (gttable.location_id == L1) & \
+                            (gttable.tag == "state")
+                    L1_abrv = db(query).select(gttable.value,
+                                               limitby=(0, 1),
+                                               ).first().value
+                    L3 = row["gis_location.L3"]
+                    lat = row["gis_location.lat"]
+                    lon = row["gis_location.lon"]
+                else:
+                    # No location
+                    L1_abrv = ""
+                    L3 = ""
+                    lat = ""
+                    lon = ""
+                alerts.append(DIV(TAG["aside"](TAG["header"](UL(LI(_class="item icon",
+                                                                   ),
+                                                                LI(status,
+                                                                   _class="item secondary status",
+                                                                   ),
+                                                                _class="status-bar-left",
+                                                                ),
+                                                             UL(bookmark,
+                                                                _class="controls",
+                                                                ),
+                                                             # @ToDo: Allow user-visible string to be translated without affecting the style
+                                                             _class="status-bar %s" % status,
+                                                             ),
+                                               DIV(H1(row["cms_post.title"],
+                                                      _class="title",
+                                                      ),
+                                                   P(SPAN("%s @ %s by %s" % (post_date, post_time, row["cms_post.created_by"]),
+                                                          _class="meta",
+                                                          ),
+                                                     BR(),
+                                                     SPAN("%s, %s; %s, %s" % (L3, L1_abrv, lat, lon),
+                                                          _class="meta-location",
+                                                          ),
+                                                     ),
+                                                   P(row["cms_post.body"],
+                                                     _class="desc",
+                                                     ),
+                                                   _class="body",
+                                                   ),
+                                               TAG["footer"](P(A(T("Read More"),
+                                                                 _href=URL(c="cms", f="post",
+                                                                           args=[record_id, "profile"],
+                                                                           ),
+                                                                 _class="more",
+                                                                 ),
+                                                               ),
+                                                             _class="footer",
+                                                             ),
+                                               _class="card-alert",
+                                               ),
+                                  _class="medium-6 large-3 columns",
+                                  ))
+            while len(alerts) < 4:
+                # Fill out empty spaces
+                alerts.append(DIV(_class="medium-6 large-3 columns",
+                                  ))
+
+        return alerts
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _events_html():
+        """
+            Create the HTML for the Events section
+        """
+
+        T = current.T
+        db = current.db
+        s3db = current.s3db
+
+        tablename = "event_event"
+        resource = s3db.resource(tablename)
+        # Just show Open Events
+        resource.add_filter(FS("~.closed") == False)
+
+        list_fields = ["id",
+                       "name",
+                       "closed",
+                       "start_date",
+                       "end_date",
+                       "exercise",
+                       "comments",
+                       "event_location.location_id$path",
+                       "event_location.location_id$L3",
+                       "event_location.location_id$addr_street",
+                       "event_location.location_id$addr_postcode",
+                       ]
+        rows = resource.select(fields=list_fields,
+                               start=None,
+                               limit=3,
+                               orderby="date desc",
+                               represent=True,
+                               raw_data=True,
+                               ).rows
+        if len(rows) == 0:
+            # Section won't be visible at all
+            events = ""
+        else:
+            # Render the list
+            events = DIV(H3("Events ",
+                            TAG["small"](A(T("See all events"),
+                                           _href=URL(c="event", f="event",
+                                                     args="summary",
+                                                     ),
+                                           ),
+                                         ),
+                            _class="well-title",
+                            ),
+                         _class="row well",
+                         )
+            itable = s3db.event_incident
+            iquery = (itable.deleted == False)
+            rtable = s3db.event_team
+            rquery = (rtable.deleted == False)
+            gttable = s3db.gis_location_tag
+            auth = current.auth
+            if auth.is_logged_in():
+                logged_in = True
+                user_id = auth.user.id
+                etable = s3db.event_event
+                has_permission = auth.s3_has_permission
+                btable = s3db.event_bookmark
+                bquery = (btable.user_id == user_id) & \
+                         (btable.event_id.belongs([row["event_event.id"] for row in rows])) & \
+                         (btable.deleted == False)
+                bookmarks = db(bquery).select(btable.event_id)
+                bookmarks = [b.event_id for b in bookmarks]
+            else:
+                logged_in = False
+            for row in rows:
+                record_id = row["event_event.id"]
+                incidents = db(iquery & (itable.event_id == record_id)).count()
+                resources = db(rquery & (rtable.event_id == record_id)).count()
+                meta = "%s Incidents %s Resources" % (incidents, resources)
+                if row._row["event_event.exercise"]:
+                    status = "Testing"
+                elif row._row["event_event.end_date"]:
+                    status = "Complete"
+                else:
+                    status = "Active"
+                start_dt = row._row["event_event.start_date"]
+                start_date = start_dt.date().strftime("%b %d, %Y")
+                start_time = start_dt.time().strftime("%H:%M")
+                end_dt = row._row["event_event.end_date"]
+                if end_dt:
+                    end_date = start_dt.date().strftime("%b %d, %Y")
+                    end_time = start_dt.time().strftime("%H:%M")
+                    end_date = TAG[""](SPAN("Closed at:",
+                                            _class="date-label",
+                                            ),
+                                       SPAN("%s @ %s" % (end_date, end_time),
+                                            _class="date",
+                                            )
+                                       )
+                else:
+                    end_date = ""
+                if logged_in:
+                    if record_id in bookmarks:
+                        bookmark = LI(ICON("bookmark"),
+                                      _title=T("Remove Bookmark"),
+                                      _class="item bookmark",
+                                      )
+                    else:
+                        bookmark = LI(ICON("bookmark-empty"),
+                                      _title=T("Add Bookmark"),
+                                      _class="item bookmark",
+                                      )
+                    bookmark["_data-c"] = "event"
+                    bookmark["_data-f"] = "event"
+                    bookmark["_data-i"] = record_id
+                    if has_permission("update", etable, record_id):
+                        edit = LI(A(ICON("pencil"),
+                                    _href=URL(c="event", f="event",
+                                              args=["%s.popup" % record_id, "update"]
+                                              ),
+                                    _title=T("Edit Event"),
+                                    _class="s3_modal",
+                                    ),
+                                  _class="item edit",
+                                  )
+                    else:
+                        edit = ""
+                else:
+                    bookmark = ""
+                    edit = ""
+                path = row._row["gis_location.path"]
+                if path:
+                    L1 = path.split("/")[1]
+                    query = (gttable.location_id == L1) & \
+                            (gttable.tag == "state")
+                    L1_abrv = db(query).select(gttable.value,
+                                               limitby=(0, 1),
+                                               ).first().value
+                    L3 = row["gis_location.L3"]
+                    addr_street = row["gis_location.addr_street"]
+                    addr_postcode = row["gis_location.addr_postcode"]
+                else:
+                    # No location
+                    L1_abrv = ""
+                    L3 = ""
+                    addr_street = ""
+                    addr_postcode = ""
+                events.append(DIV(TAG["aside"](TAG["header"](UL(LI(status,
+                                                                   _class="item primary status",
+                                                                   ),
+                                                                _class="status-bar-left",
+                                                                ),
+                                                             UL(bookmark,
+                                                                edit,
+                                                                _class="controls",
+                                                                ),
+                                                             _class="status-bar highlight",
+                                                             ),
+                                               DIV(H1(row["event_event.name"],
+                                                      _class="title",
+                                                      ),
+                                                   DIV(DIV(SPAN(addr_street,
+                                                                _class="street-address",
+                                                                ),
+                                                           SPAN(L3,
+                                                                _class="locality",
+                                                                ),
+                                                           SPAN(L1_abrv,
+                                                                _class="region",
+                                                                ),
+                                                           SPAN(addr_postcode,
+                                                                _class="postal-code",
+                                                                ),
+                                                           _class="adr",
+                                                           ),
+                                                       SPAN("Zero hour:",
+                                                            _class="date-label",
+                                                            ),
+                                                       SPAN("%s @ %s" % (start_date, start_time),
+                                                            _class="date",
+                                                            ),
+                                                       BR(),
+                                                       end_date,
+                                                       _class="event-date-location",
+                                                       ),
+                                                   P(meta,
+                                                     _class="meta",
+                                                     ),
+                                                   P(row["event_event.comments"],
+                                                     _class="desc",
+                                                     ),
+                                                   _class="body",
+                                                   ),
+                                               TAG["footer"](P(A(T("Read More"),
+                                                                 _href=URL(c="event", f="event",
+                                                                           args=[record_id, "profile"],
+                                                                           ),
+                                                                 _class="more",
+                                                                 ),
+                                                               ),
+                                                             _class="footer",
+                                                             ),
+                                               _class="card-event",
+                                               ),
+                                  _class="medium-4 columns",
+                                  ))
+            while len(events) < 4:
+                # Fill out empty spaces
+                events.append(DIV(_class="medium-6 large-3 columns",
+                                  ))
+
+        return events
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _system_wide_html():
+        """
+            Create the HTML for the System-wide 'Alert' section
+        """
+
+        ADMIN = current.auth.s3_has_role("ADMIN")
+
+        table = current.s3db.cms_post
+        record = current.db(table.name == "SYSTEM_WIDE").select(table.body,
+                                                                limitby=(0, 1)
+                                                                ).first()
+        if record or ADMIN:
+            if ADMIN:
+                edit_btn = P(A(current.T("Edit System-wide Alert"),
+                               _href = URL(c="cms", f="post",
+                                           args = "update",
+                                           vars = {"page": "SYSTEM_WIDE"},
+                                           ),
+                               _class = "button button-info tiny",
+                               ),
+                             _class = "large-3 small-12 columns text-right",
+                             )
+            else:
+                edit_btn = ""
+            system_wide = DIV(DIV(DIV(P(record and record.body or "",
+                                        ),
+                                      _class="large-9 small-12 columns",
+                                      ),
+                                  edit_btn,
+                                  _role="complementary",
+                                 _class="row panel callout",
+                                 ),
+                              _class="row",
+                              )
+        else:
+            # Don't display the section
+            system_wide = ""
+
+        return system_wide
 
     # -------------------------------------------------------------------------
     def _updates_html(self, r, output, incident_id, updateable, **attr):
@@ -473,85 +899,18 @@ class custom_WACOP(S3CRUD):
 
         #  Create Form for Updates
         if updateable and auth.s3_has_permission("create", tablename):
-            # @ToDo: AJAX Form Submission
-
-            stable = db.cms_series
-            series = db(stable.deleted == False).select(stable.name,
-                                                        stable.id,
-                                                        )
-            select = SELECT(OPTION("Choose an update type…",
-                                   _disabled=True,
-                                   ),
-                            _id="cms_post_series_id",
-                            _name="series_id",
-                            )
-            for s in series:
-                # @ToDo: Option for T()
-                select.append(OPTION(s.name,
-                                     _value=s.id,
-                                     ))
-
-            #form = SQLFORM(ptable)
-            #hidden_fields = form.hidden_fields()
-            #custom = form.custom
-            #widgets = custom.widget
-            formname = "cms_post/create"
-            formkey = web2py_uuid()
-            keyname = "_formkey[%s]" % formname
-            session = current.session
-            session[keyname] = list(session.get(keyname, []))[-9:] + [formkey]
-            form = FORM(LABEL("Write new Update Post:",
-                              _for="body",
-                              ),
-                        TEXTAREA(_id="cms_post_body",
-                                 _name="body",
-                                 _placeholder="Write something…",
-                                 _rows="4",
-                                 ),
-                        DIV(DIV(select,
-                                _class="large-4 columns",
-                                ),
-                            DIV(INPUT(_id="cms_post_create_tags_input",
-                                      _class="hide",
-                                      _name="tags",
-                                      _type="text",
-                                      _value="",
-                                      ),
-                                UL(_id="cms_post_create_tags_ul",
-                                   ),
-                                _class="large-3 columns",
-                                ),
-                            DIV(INPUT(_type="submit",
-                                      _class="button tiny default right",
-                                      _value="Post Update",
-                                      ),
-                                _class="large-5 columns",
-                                ),
-                            _class="row",
-                            ),
-                        #hidden_fields, # Only needed for updates
-                        DIV(INPUT(_name="_formname",
-                                  _value=formname,
-                                  _type="hidden",
-                                  ),
-                            INPUT(_name="_formkey",
-                                  _value=formkey,
-                                  _type="hidden",
-                                  ),
-                            _style="display:none;",
-                            ),
-                        _class="form",
-                        action="#",
-                        enctype="multipart/form-data",
-                        method="post",
-                        )
-
-            form_div = DIV(form,
-                           _class="compose-update panel",
-                           )
-            output["create_post_form"] = form_div
+            output["create_post_button"] = DIV(A(ICON("add"),
+                                                 T("Add Update"),
+                                                 _href=URL(c="event", f="incident",
+                                                           args = [incident_id, "post", "create.popup"],
+                                                           vars={"refresh": "updates_datalist"},
+                                                           ),
+                                                 _class="s3_modal button wide radius",
+                                                 ),
+                                               _class="panel",
+                                               )
         else:
-            output["create_post_form"] = ""
+            output["create_post_button"] = ""
 
         # Tags for Updates
         s3 = current.response.s3
@@ -878,20 +1237,23 @@ class incident_Profile(custom_WACOP):
                                       limitby=(0, 1)
                                       ).first()
             if exists:
-                bookmark_btn = A(ICON("bookmark"),
-                                 _title=T("Remove Bookmark"),
-                                 _id="incident-bookmark",
-                                 )
+                bookmark = A(ICON("bookmark"),
+                             _title=T("Remove Bookmark"),
+                             _class="item bookmark",
+                             )
             else:
-                bookmark_btn = A(ICON("bookmark-empty"),
-                                 _title=T("Add Bookmark"),
-                                 _id="incident-bookmark",
-                                 )
-            script = '''incident_bookmarks(%s)''' % incident_id
+                bookmark = A(ICON("bookmark-empty"),
+                             _title=T("Add Bookmark"),
+                             _class="item bookmark",
+                             )
+            bookmark["_data-c"] = "event"
+            bookmark["_data-f"] = "incident"
+            bookmark["_data-i"] = incident_id
+            script = '''wacop_bookmarks()'''
             s3.jquery_ready.append(script)
         else:
-            bookmark_btn = ""
-        output["bookmark_btn"] = bookmark_btn
+            bookmark = ""
+        output["bookmark_btn"] = bookmark
 
         # Is this Incident part of an Event?
         event_id = record.event_id
@@ -1017,6 +1379,7 @@ class incident_Profile(custom_WACOP):
         dtargs["dt_base_url"] = r.url(method="", vars={})
 
         s3.no_formats = True
+        datatable = self._datatable
 
         # Resources dataTable
         tablename = "event_team"
@@ -1025,17 +1388,17 @@ class incident_Profile(custom_WACOP):
                        "status_id",
                        ]
         orderby = "pr_group.name"
-        self._datatable(r,
-                        output,
-                        dtargs,
-                        dt_init,
-                        incident_id,
-                        updateable,
-                        start,
-                        limit,
-                        tablename,
-                        list_fields,
-                        orderby)
+        datatable(r,
+                  output,
+                  dtargs,
+                  dt_init,
+                  incident_id,
+                  updateable,
+                  start,
+                  limit,
+                  tablename,
+                  list_fields,
+                  orderby)
 
         # Tasks dataTable
         tablename = "project_task"
@@ -1045,17 +1408,17 @@ class incident_Profile(custom_WACOP):
                        (T("Due"), "date_due"),
                        ]
         orderby = "project_task.date_due"
-        self._datatable(r,
-                        output,
-                        dtargs,
-                        dt_init,
-                        incident_id,
-                        updateable,
-                        start,
-                        limit,
-                        tablename,
-                        list_fields,
-                        orderby)
+        datatable(r,
+                  output,
+                  dtargs,
+                  dt_init,
+                  incident_id,
+                  updateable,
+                  start,
+                  limit,
+                  tablename,
+                  list_fields,
+                  orderby)
 
         # Staff dataTable
         tablename = "event_human_resource"
@@ -1068,17 +1431,17 @@ class incident_Profile(custom_WACOP):
                        (T("Notes"), "comments"),
                        ]
         orderby = "event_human_resource.human_resource_id"
-        self._datatable(r,
-                        output,
-                        dtargs,
-                        dt_init,
-                        incident_id,
-                        updateable,
-                        start,
-                        limit,
-                        tablename,
-                        list_fields,
-                        orderby)
+        datatable(r,
+                  output,
+                  dtargs,
+                  dt_init,
+                  incident_id,
+                  updateable,
+                  start,
+                  limit,
+                  tablename,
+                  list_fields,
+                  orderby)
 
         # Organisations dataTable
         tablename = "event_organisation"
@@ -1087,17 +1450,17 @@ class incident_Profile(custom_WACOP):
                        "comments",
                        ]
         orderby = "event_organisation.organisation_id"
-        self._datatable(r,
-                        output,
-                        dtargs,
-                        dt_init,
-                        incident_id,
-                        updateable,
-                        start,
-                        limit,
-                        tablename,
-                        list_fields,
-                        orderby)
+        datatable(r,
+                  output,
+                  dtargs,
+                  dt_init,
+                  incident_id,
+                  updateable,
+                  start,
+                  limit,
+                  tablename,
+                  list_fields,
+                  orderby)
 
         # Updates DataList
         self._updates_html(r, output, incident_id, updateable, **attr)
@@ -1194,6 +1557,7 @@ class person_Dashboard(custom_WACOP):
         dtargs["dt_base_url"] = r.url(method="", vars={})
 
         s3.no_formats = True
+        datatable = self._datatable
 
         # Tasks dataTable
         tablename = "project_task"
@@ -1203,17 +1567,17 @@ class person_Dashboard(custom_WACOP):
                        (T("Due"), "date_due"),
                        ]
         orderby = "project_task.date_due"
-        self._datatable(r,
-                        output,
-                        dtargs,
-                        dt_init,
-                        None, # incident_id
-                        True, # updateable
-                        start,
-                        limit,
-                        tablename,
-                        list_fields,
-                        orderby)
+        datatable(r,
+                  output,
+                  dtargs,
+                  dt_init,
+                  None, # incident_id
+                  True, # updateable
+                  start,
+                  limit,
+                  tablename,
+                  list_fields,
+                  orderby)
 
         # Staff dataTable
         tablename = "hrm_human_resource"
@@ -1224,34 +1588,34 @@ class person_Dashboard(custom_WACOP):
                        (T("Phone"), "person_id$phone.value"),
                        ]
         orderby = "hrm_human_resource.person_id"
-        self._datatable(r,
-                        output,
-                        dtargs,
-                        dt_init,
-                        None, # incident_id
-                        True, # updateable
-                        start,
-                        limit,
-                        tablename,
-                        list_fields,
-                        orderby)
+        datatable(r,
+                  output,
+                  dtargs,
+                  dt_init,
+                  None, # incident_id
+                  True, # updateable
+                  start,
+                  limit,
+                  tablename,
+                  list_fields,
+                  orderby)
 
         # Organisations dataTable
         tablename = "org_organisation"
         list_fields = ["name",
                        ]
         orderby = "org_organisation.name"
-        self._datatable(r,
-                        output,
-                        dtargs,
-                        dt_init,
-                        None, # incident_id
-                        True, # updateable
-                        start,
-                        limit,
-                        tablename,
-                        list_fields,
-                        orderby)
+        datatable(r,
+                  output,
+                  dtargs,
+                  dt_init,
+                  None, # incident_id
+                  True, # updateable
+                  start,
+                  limit,
+                  tablename,
+                  list_fields,
+                  orderby)
 
         # Updates DataList (without Create...at least until we can select an Incident to link it to)
         self._updates_html(r, output, None, False, **attr)
@@ -1400,9 +1764,11 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
     divider["_aria-hidden"] = "true"
 
     toolbar = UL(LI(A(ICON("share"),
-                      " Share",
+                      SPAN("share this",
+                           _class = "show-for-sr",
+                           ),
                       _href="#",
-                      _class="button secondary tiny",
+                      _title="Share",
                       ),
                     _class="item",
                     ),
@@ -1418,7 +1784,6 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
                  LI(bookmark_btn,
                     _class="item",
                     ),
-                 divider,
                  LI(A(I(_class="fa fa-users",
                         ),
                       SPAN("make public",
@@ -1435,8 +1800,7 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
                  LI(delete_btn,
                     _class="item",
                     ),
-                 #_class="inline-list right",
-                 _class="right",
+                 _class="controls",
                  )
 
     #if settings.get_cms_show_tags():
@@ -1454,31 +1818,30 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
                                ))
 
     item = TAG["ARTICLE"](TAG["HEADER"](UL(# post priority icon
-                                           LI(SPAN(_class="dl-priority dl-icon-alert",
-                                                   ),
-                                              _class="icon",
+                                           LI(_class="item icon",
                                               ),
                                            # post type title
                                            LI(series_title,
-                                              _class="title",
+                                              _class="item primary",
                                               ),
                                            # post status
                                            LI(status,
-                                              _class="item borders",
+                                              _class="item secondary border status",
                                               ),
                                            # post visibility
                                            # @ToDo: Read the visibility
                                            LI(T("Public"),
-                                              _class="item borders",
+                                              _class="item secondary border visibility",
                                               ),
+                                           _class="status-bar-left"
                                            ),
                                         toolbar,
-                                        _class="left",
+                                        _class="status-bar",
                                         ),
                           DIV(P(TAG["TIME"](date),
                                 " by ",
                                 person,
-                                "&mdash;",
+                                " – ",
                                 # @ToDo: Make comments work
                                 A("0 Comments",
                                   #_href="#update-1-comments",
@@ -1489,9 +1852,9 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
                               _class="dl-body",
                               ),
                           TAG["FOOTER"](tag_list,
-                                        _class="clearfix",
+                                        _class="footer",
                                         ),
-                          #_class="panel",
+                          _class="card-post",
                           _id=item_id,
                           )
 

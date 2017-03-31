@@ -678,7 +678,9 @@ class S3VolunteerAwardModel(S3Model):
         #
         tablename = "vol_volunteer_award"
         define_table(tablename,
-                     self.pr_person_id(empty=False),
+                     self.pr_person_id(empty = False,
+                                       ondelete = "CASCADE",
+                                       ),
                      award_id(),
                      s3_date(future = 0,
                              ),
@@ -762,7 +764,7 @@ class S3VolunteerClusterModel(S3Model):
         # Volunteer Cluster
         tablename = "vol_cluster_type"
         define_table(tablename,
-                     Field("name", length=255, notnull=True, unique=True, 
+                     Field("name", length=255, notnull=True, unique=True,
                            label = T("Name"),
                            requires = [IS_NOT_EMPTY(),
                                        IS_LENGTH(255),
@@ -1738,13 +1740,13 @@ def vol_person_controller():
                 table.person_id.writable = table.person_id.readable = False
                 table.site_id.writable = table.site_id.readable = False
                 table.site_contact.writable = table.site_contact.readable = False
-                org = session.s3.hrm.org
-                field = table.organisation_id
-                if org is None:
-                    field.widget = None
-                else:
-                    field.default = org
-                    field.readable = field.writable = False
+                #org = session.s3.hrm.org
+                #field = table.organisation_id
+                #if org is None:
+                #    field.widget = None
+                #else:
+                #    field.default = org
+                #    field.readable = field.writable = False
 
                 # Organisation Dependent Fields
                 # @ToDo: Move these to the IFRC Template & make Lazy settings
@@ -1752,6 +1754,7 @@ def vol_person_controller():
                 set_org_dependent_field("vol_volunteer_cluster", "vol_cluster_type_id")
                 set_org_dependent_field("vol_volunteer_cluster", "vol_cluster_id")
                 set_org_dependent_field("vol_volunteer_cluster", "vol_cluster_position_id")
+
             elif method == "cv" or r.component_name == "training":
                 list_fields = ["course_id",
                                "grade",

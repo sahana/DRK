@@ -283,35 +283,35 @@ def config(settings):
                 result = standard_prep(r)
 
             if r.representation == "popup":
-                # Popups for lists in Parent Event of Incident Screen
-
-                # No Title since this is on the Popup
-                s3.crud_strings["event_event"].title_display = ""
-                # No create button & Tweak list_fields
                 cname = r.component_name
-                if cname == "incident":
-                    list_fields = ["date",
-                                   "name",
-                                   "incident_type_id",
-                                   ]
-                elif cname == "team":
-                    list_fields = ["incident_id",
-                                   "group_id",
-                                   "status_id",
-                                   ]
-                elif cname == "post":
-                    list_fields = ["date",
-                                   "series_id",
-                                   "priority",
-                                   "status_id",
-                                   "body",
-                                   ]
-                else:
-                    # Shouldn't get here but want to avoid crashes
-                    list_fields = []
-                r.component.configure(insertable = False,
-                                      list_fields = list_fields,
-                                      )
+                if cname:
+                    # Popups for lists in Parent Event of Incident Screen
+                    # No Title since this is on the Popup
+                    s3.crud_strings["event_event"].title_display = ""
+                    # No create button & Tweak list_fields
+                    if cname == "incident":
+                        list_fields = ["date",
+                                       "name",
+                                       "incident_type_id",
+                                       ]
+                    elif cname == "team":
+                        list_fields = ["incident_id",
+                                       "group_id",
+                                       "status_id",
+                                       ]
+                    elif cname == "post":
+                        list_fields = ["date",
+                                       "series_id",
+                                       "priority",
+                                       "status_id",
+                                       "body",
+                                       ]
+                    else:
+                        # Shouldn't get here but want to avoid crashes
+                        list_fields = []
+                    r.component.configure(insertable = False,
+                                          list_fields = list_fields,
+                                          )
 
             return True
         s3.prep = custom_prep
@@ -446,18 +446,28 @@ def config(settings):
                 current.menu.main = ""
 
             elif r.representation == "popup":
-                # Popup just used to link to Event
+                if not r.component:
+                    # Popup just used to link to Event
 
-                #s3.crud_strings["event_incident"].title_update =  T("Add to Event")
+                    #s3.crud_strings["event_incident"].title_update =  T("Add to Event")
 
-                from s3 import S3SQLCustomForm
+                    from s3 import S3SQLCustomForm
 
-                crud_form = S3SQLCustomForm("event_id",
-                                            )
+                    crud_form = S3SQLCustomForm("event_id",
+                                                )
 
-                s3db.configure("event_incident",
-                               crud_form = crud_form,
-                               )
+                    s3db.configure("event_incident",
+                                   crud_form = crud_form,
+                                   )
+                elif r.component_name == "post":
+                    from s3 import S3SQLCustomForm
+
+                    crud_form = S3SQLCustomForm("body",
+                                                )
+
+                    s3db.configure("cms_post",
+                                   crud_form = crud_form,
+                                   )
 
             return True
         s3.prep = custom_prep
@@ -496,20 +506,9 @@ def config(settings):
                                               update_url=custom_url)
 
                     # System-wide Alert
-                    if current.auth.s3_has_role("ADMIN"):
-                        # Admin user can edit system_wide alert
-                        output["ADMIN"] = True
-                    else:
-                        output["ADMIN"] = False
-
-                    ptable = s3db.cms_post
-                    system_wide = current.db(ptable.name == "SYSTEM_WIDE").select(ptable.body,
-                                                                                  limitby=(0, 1)
-                                                                                  ).first()
-                    if system_wide:
-                        output["system_wide"] = system_wide.body
-                    else:
-                        output["system_wide"] = False
+                    from templates.WACOP.controllers import custom_WACOP
+                    custom = custom_WACOP()
+                    output["system_wide"] = custom._system_wide_html()
 
             return output
         s3.postp = custom_postp
@@ -632,12 +631,9 @@ def wacop_event_rheader(r, tabs=[]):
                         (T("Updates"), "post"),
                         ]
 
-            rheader_fields = [["name",
-                               ],
-                              ["start_date",
-                               ],
-                              ["comments",
-                               ],
+            rheader_fields = [["name"],
+                              ["start_date"],
+                              ["comments"],
                               ]
 
         elif tablename == "event_incident":
@@ -649,12 +645,9 @@ def wacop_event_rheader(r, tabs=[]):
                         (T("Updates"), "post"),
                         ]
 
-            rheader_fields = [["name",
-                               ],
-                              ["date",
-                               ],
-                              ["comments",
-                               ],
+            rheader_fields = [["name"],
+                              ["date"],
+                              ["comments"],
                               ]
 
         rheader = S3ResourceHeader(rheader_fields, tabs)(r,

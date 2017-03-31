@@ -44,6 +44,8 @@ __all__ = ("S3PersonEntity",
            "S3PersonPresence",
            "S3PersonDescription",
            "S3ImageLibraryModel",
+           # Search Method
+           "pr_PersonSearchAutocomplete",
            # Representation Methods
            "pr_get_entities",
            "pr_RoleRepresent",
@@ -266,6 +268,9 @@ class S3PersonEntity(S3Model):
                        dvi_identification = {"joinby": pe_id,
                                              "multiple": False,
                                              },
+                       # Tenures
+                       stdm_tenure_relationship = pe_id,
+
                        # Map Configs 'Saved Maps'
                        #   - Personalised configurations
                        #   - OU configurations (Organisation/Branch/Facility/Team)
@@ -999,7 +1004,8 @@ class S3PersonModel(S3Model):
         set_method = self.set_method
         set_method("pr", "person",
                    method = "search_ac",
-                   action = self.pr_search_ac)
+                   action = self.pr_search_ac,
+                   )
 
         set_method("pr", "person",
                    method = "lookup",
@@ -1139,6 +1145,13 @@ class S3PersonModel(S3Model):
                                                 "type": 1,
                                                 },
                                             },
+                                           # National ID in particular
+                                           {"name": "national_id",
+                                            "joinby": "person_id",
+                                            "filterby": {
+                                                "type": 2,
+                                                },
+                                            },
                                            ),
                             # Personal Details
                             pr_person_details = {"joinby": "person_id",
@@ -1146,6 +1159,8 @@ class S3PersonModel(S3Model):
                                                  },
                             # Tags
                             pr_person_tag = "person_id",
+                            # Seized Items (owner)
+                            security_seized_item = "person_id",
                             )
 
         # ---------------------------------------------------------------------
@@ -3448,6 +3463,7 @@ class S3PersonImageModel(S3Model):
 
         T = current.T
         db = current.db
+        request = current.request
 
         # ---------------------------------------------------------------------
         # Image
@@ -3461,60 +3477,59 @@ class S3PersonImageModel(S3Model):
             9:T("other")
         }
 
-        tablename = "pr_image"
-        self.define_table(tablename,
-                          # Component not Instance
-                          self.super_link("pe_id", "pr_pentity"),
-                          Field("profile", "boolean",
-                                default = False,
-                                label = T("Profile Picture?"),
-                                represent = s3_yes_no_represent,
-                                ),
-                          Field("image", "upload",
-                                autodelete = True,
-                                length = current.MAX_FILENAME_LENGTH,
-                                represent = self.pr_image_represent,
-                                widget = S3ImageCropWidget((600, 600)),
-                                comment =  DIV(_class="tooltip",
-                                               _title="%s|%s" % (T("Image"),
-                                                                 T("Upload an image file here. If you don't upload an image file, then you must specify its location in the URL field.")))),
-                          Field("url",
-                                label = T("URL"),
-                                represent = pr_url_represent,
-                                comment = DIV(_class="tooltip",
-                                              _title="%s|%s" % (T("URL"),
-                                                                T("The URL of the image file. If you don't upload an image file, then you must specify its location here.")))),
-                          Field("type", "integer",
-                                default = 1,
-                                label = T("Image Type"),
-                                represent = lambda opt: \
-                                            pr_image_type_opts.get(opt,
-                                               current.messages.UNKNOWN_OPT),
-                                requires = IS_IN_SET(pr_image_type_opts,
-                                                     zero=None),
-                                ),
-                          s3_comments("description",
-                                      label=T("Description"),
-                                      comment = DIV(_class="tooltip",
-                                                    _title="%s|%s" % (T("Description"),
-                                                                      T("Give a brief description of the image, e.g. what can be seen where on the picture (optional).")))),
-                          *s3_meta_fields())
-
-        # @todo: make lazy_table
-        table = db[tablename]
-
-        def get_file():
+        def get_file(table):
             """ Callback to return the file field for our record """
-            if len(current.request.args) < 3:
+            if len(request.args) < 3:
                 return None
-            query = (table.id == current.request.args[2])
+            query = (table.id == request.args[2])
             record = db(query).select(table.image, limitby = (0, 1)).first()
             return record.image if record else None
 
-        # Can't be specified inline as needs callback to be defined, which needs table
-        table.image.requires = IS_PROCESSED_IMAGE("image", get_file,
-                                                  upload_path=os.path.join(current.request.folder,
-                                                                           "uploads"))
+        tablename = "pr_image"
+        self.define_table(tablename,
+          # Component not Instance
+          self.super_link("pe_id", "pr_pentity"),
+          Field("profile", "boolean",
+                default = False,
+                label = T("Profile Picture?"),
+                represent = s3_yes_no_represent,
+                ),
+          Field("image", "upload",
+                autodelete = True,
+                length = current.MAX_FILENAME_LENGTH,
+                represent = self.pr_image_represent,
+                widget = S3ImageCropWidget((600, 600)),
+                comment =  DIV(_class="tooltip",
+                               _title="%s|%s" % (T("Image"),
+                                                 T("Upload an image file here. If you don't upload an image file, then you must specify its location in the URL field.")))),
+          Field("url",
+                label = T("URL"),
+                represent = pr_url_represent,
+                comment = DIV(_class="tooltip",
+                              _title="%s|%s" % (T("URL"),
+                                                T("The URL of the image file. If you don't upload an image file, then you must specify its location here.")))),
+          Field("type", "integer",
+                default = 1,
+                label = T("Image Type"),
+                represent = lambda opt: \
+                            pr_image_type_opts.get(opt,
+                               current.messages.UNKNOWN_OPT),
+                requires = IS_IN_SET(pr_image_type_opts,
+                                     zero=None),
+                ),
+          s3_comments("description",
+                      label=T("Description"),
+                      comment = DIV(_class="tooltip",
+                                    _title="%s|%s" % (T("Description"),
+                                                      T("Give a brief description of the image, e.g. what can be seen where on the picture (optional).")))),
+          *s3_meta_fields(),
+          on_define = lambda table: [
+            table.image.set_attributes(requires = \
+                IS_PROCESSED_IMAGE("image", lambda table: get_file(table),
+                                    upload_path=os.path.join(request.folder,
+                                                             "uploads"))),
+            ]
+          )
 
         # CRUD Strings
         current.response.s3.crud_strings[tablename] = Storage(
@@ -4078,6 +4093,7 @@ class S3PersonDetailsModel(S3Model):
             4: T("separated"),
             5: T("divorced"),
             6: T("widowed"),
+            7: T("cohabiting"),
             9: T("other"),
         }
 
@@ -5674,7 +5690,7 @@ class pr_PersonEntityRepresent(S3Represent):
             label = pentity.pe_label \
                     if pentity.pe_label else self.default_label
         else:
-            label = None
+            label = ""
 
         item = object.__getattribute__(row, instance_type)
         if instance_type == "pr_person":
@@ -8401,6 +8417,147 @@ class pr_PersonListLayout(S3DataListLayout):
             toolbox.append(btn)
 
         return toolbox
+
+# =============================================================================
+class pr_PersonSearchAutocomplete(S3Method):
+    """
+        Alternative search method for S3PersonAutocompleteWidget with
+        configurable search fields (thus allowing e.g. pe_label to be
+        included)
+
+        To apply selectively, override the "search_ac" method of pr_person
+        in the respective controller (or in customise_pr_person_controller,
+        respectively)
+
+        Search rule (differs from pr_search_ac): every search field can
+        contain multiple words (separated by blanks), and every partial
+        of the search string must match the beginning of a word in any of
+        the fields (i.e. the field value must match either "partial%" or
+        "% partial%")
+    """
+
+    def __init__(self, search_fields=None):
+        """
+            Constructor
+
+            @param search_fields: tuple|list of field selectors
+        """
+
+        if search_fields is None:
+            self.search_fields = ("first_name",
+                                  "middle_name",
+                                  "last_name",
+                                  )
+        else:
+            self.search_fields = search_fields
+
+    # -------------------------------------------------------------------------
+    def apply_method(self, r, **attr):
+        """
+            Entry point for REST controller
+
+            @param r: the S3Request
+            @param attr: controller parameters for the request
+        """
+
+        response = current.response
+        settings = current.deployment_settings
+
+        # Apply response.s3.filter
+        resource = r.resource
+        resource.add_filter(response.s3.filter)
+
+        # Get the search string
+        get_vars = r.get_vars
+        value = get_vars.term or get_vars.value or get_vars.q or None
+        if not value:
+            r.error(400, "No value provided!")
+        value = s3_unicode(value).lower().strip()
+
+        # Limit to max 8 partials (prevent excessively long search queries)
+        partials = value.split()[:8]
+
+        # Build query
+        search_fields = self.search_fields
+        query = None
+        for partial in partials:
+            pquery = None
+            for field in search_fields:
+                selector = FS(field).lower()
+                fquery = selector.like("%s%%" % partial) | \
+                         selector.like("%% %s%%" % partial)
+                if pquery:
+                    pquery |= fquery
+                else:
+                    pquery = fquery
+            if query:
+                query &= pquery
+            else:
+                query = pquery
+        if query is not None:
+            resource.add_filter(query)
+
+        # Limit the search
+        limit = int(get_vars.limit or 0)
+        MAX_SEARCH_RESULTS = settings.get_search_max_results()
+        if (not limit or limit > MAX_SEARCH_RESULTS) and \
+           resource.count() > MAX_SEARCH_RESULTS:
+            msg = current.T("There are more than %(max)s results, please input more characters.")
+            output = [{"label": s3_str(msg % {"max": MAX_SEARCH_RESULTS})}]
+        else:
+            fields = ["id"]
+            fields.extend(search_fields)
+
+            # Include HR fields?
+            show_hr = settings.get_pr_search_shows_hr_details()
+            if show_hr:
+                fields.append("human_resource.job_title_id$name")
+                show_orgs = settings.get_hrm_show_organisation()
+                if show_orgs:
+                    fields.append("human_resource.organisation_id$name")
+
+            # Sort results alphabetically (according to name format)
+            name_format = settings.get_pr_name_format()
+            match = re.match("\s*?%\((?P<fname>.*?)\)s.*", name_format)
+            if match:
+                orderby = "pr_person.%s" % match.group("fname")
+            else:
+                orderby = "pr_person.first_name"
+
+            # Extract results
+            rows = resource.select(fields=fields,
+                                   start=0,
+                                   limit=limit,
+                                   orderby=orderby,
+                                   ).rows
+
+            # Build output
+            items = []
+            iappend = items.append
+            for row in rows:
+                name = Storage(first_name=row["pr_person.first_name"],
+                               middle_name=row["pr_person.middle_name"],
+                               last_name=row["pr_person.last_name"],
+                               )
+                name = s3_fullname(name)
+                if "pe_label" in search_fields:
+                    name = "%s %s" % (row["pr_person.pe_label"], name)
+                item = {"id"    : row["pr_person.id"],
+                        "name"  : name,
+                        }
+                if show_hr:
+                    job_title = row.get("hrm_job_title.name", None)
+                    if job_title:
+                        item["job"] = job_title
+                    if show_orgs:
+                         org = row.get("org_organisation.name", None)
+                         if org:
+                            item["org"] = org
+                iappend(item)
+            output = items
+
+        response.headers["Content-Type"] = "application/json"
+        return json.dumps(output, separators=SEPARATORS)
 
 # =============================================================================
 def pr_filter_list_layout(list_id, item_id, resource, rfields, record):

@@ -99,21 +99,21 @@ class S3MainMenu(default.S3MainMenu):
                     M("Warehouses", c="inv", f="warehouse"),
                 ),
                 MM("Assessments", c="dc", f="respnse", m="summary")(
-                    M("Table", m="list"),
-                    M("Report", m="report"),
-                    M("Map", m="map"),
+                    #M("Table", m="list"),
+                    #M("Report", m="report"),
+                    #M("Map", m="map"),
                 ),
                 MM("Projects", c="project", f="project", m="summary")(
-                    M("Report", m="report"),
-                    M("Map", m="map"),
+                    #M("Report", m="report"),
+                    #M("Map", m="map"),
                 ),
                 MM("Activities", c="project", f="activity", m="summary")(
-                    M("Report", m="report"),
-                    M("Map", m="map"),
+                    #M("Report", m="report"),
+                    #M("Map", m="map"),
                 ),
                 MM("SitReps", c="doc", f="sitrep")(
-                    M("Report", m="report"),
-                    M("Map", m="map"),
+                    #M("Report", m="report"),
+                    #M("Map", m="map"),
                 ),
                 homepage("gis"),
             ]
@@ -137,7 +137,8 @@ class S3MainMenu(default.S3MainMenu):
             # Manage Distributions inc Beneficiary Registration
             return [
                 homepage(),
-                M("Beneficiaries", c="dvr", f="person"),
+                # Beneficiaries only managed via their Distribution
+                #M("Beneficiaries", c="dvr", f="person"),
                 M("Distributions", c="project", f="distribution"),
                 homepage("gis"),
             ]
@@ -145,7 +146,9 @@ class S3MainMenu(default.S3MainMenu):
             # Field Operations
             return [
                 homepage(),
-                MM("Assessments", c="dc", f="target"),
+                MM("Assessments", c="dc", f="respnse", m="summary")(
+                    M("Targets", f="target"),
+                ),
                 MM("Projects", c="project", f="project"),
                 MM("Activities", c="project", f="activity"),
                 MM("SitReps", c="doc", f="sitrep"),
@@ -157,7 +160,7 @@ class S3MainMenu(default.S3MainMenu):
             return [
                 homepage(),
                 MM("Calendar", c="cms", f="post", m="calendar"), # Weekly Schedule
-                MM("Assessments", c="dc", f="collection", m="summary"),
+                MM("Assessments", c="dc", f="respnse", m="summary"),
                 MM("SitReps", c="doc", f="sitrep"),
                 MM("4W", c="project", f="activity", m="summary"),
                 homepage("gis"),
@@ -373,8 +376,9 @@ class S3OptionsMenu(default.S3OptionsMenu):
             # Manage Distributions inc Beneficiary Registration
             return M(c="project")(
                      M("Distributions", f="distribution")(
-                        M("Create", m="create"),
-                        M("Map", m="map"),
+                        # Logs can only add Beneficiaries to existing Activities
+                        #M("Create", m="create"),
+                        #M("Map", m="map"),
                      ),
                  )
         elif has_role("ERT_LEADER"):

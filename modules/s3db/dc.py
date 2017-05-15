@@ -243,13 +243,24 @@ class DataCollectionTemplateModel(S3Model):
                            label = T("Options"),
                            requires = IS_EMPTY_OR(IS_JSONS3()),
                            ),
+                     # Use List to force order or Dict to alphasort
+                     #Field("sort_options", "boolean",
+                     #      default = True,
+                     #      label = T("Sort Options?"),
+                     #      represent = s3_yes_no_represent,
+                     #      comment = DIV(_class="tooltip",
+                     #                    _title="%s|%s" % (T("Sort Options?"),
+                     #                                      T("Whether options should be sorted alphabetically"),
+                     #                                      ),
+                     #                    ),
+                     #      ),
                      Field("require_not_empty", "boolean",
                            default = False,
-                           label = T("Is required"),
+                           label = T("Required?"),
                            represent = s3_yes_no_represent,
                            comment = DIV(_class="tooltip",
-                                         _title="%s|%s" % (T("Is required"),
-                                                           T("Field value must not be empty"),
+                                         _title="%s|%s" % (T("Required?"),
+                                                           T("Is the field mandatory? (Cannot be left empty)"),
                                                            ),
                                          ),
                            ),
@@ -364,7 +375,11 @@ class DataCollectionTemplateModel(S3Model):
             return
 
         # Create the Dynamic Table
-        table_id = current.s3db.s3_table.insert(title = form_vars.get("name"))
+        mobile_data = current.deployment_settings.get_dc_mobile_data()
+        table_id = current.s3db.s3_table.insert(title = form_vars.get("name"),
+                                                #mobile_form = False,
+                                                mobile_data = mobile_data,
+                                                )
 
         # Add a Field to link Answers together
         db = current.db
@@ -413,25 +428,30 @@ class DataCollectionTemplateModel(S3Model):
                                                        limitby=(0, 1)
                                                        ).first()
 
-        options = question.options
         field_type = question.field_type
+        options = None
         if field_type == 1:
             field_type = "string"
-        elif field_type in (2, 5, 6):
-            if field_type == 5:
-                T = current.T
-                options = {1: T("Yes"),
-                           2: T("No"),
-                           3: T("Don't Know"),
-                           }
+        elif field_type == 2:
             field_type = "integer"
         elif field_type == 4:
             field_type = "boolean"
+        elif field_type == 5:
+            T = current.T
+            options = [T("Yes"),
+                       T("No"),
+                       T("Don't Know"),
+                       ]
+            field_type = "string"
+        elif field_type == 6:
+            options = question.options
+            field_type = "string"
         elif field_type == 7:
             field_type = "date"
         elif field_type == 8:
             field_type = "datetime"
         else:
+            current.log.debug(field_type)
             raise NotImplementedError
 
         field_id = question.field_id
@@ -440,6 +460,7 @@ class DataCollectionTemplateModel(S3Model):
             db(current.s3db.s3_field.id == field_id).update(label = question.name,
                                                             field_type = field_type,
                                                             options = options,
+                                                            #settings = settings,
                                                             require_not_empty = question.require_not_empty,
                                                             comments = question.comments,
                                                             )
@@ -458,6 +479,7 @@ class DataCollectionTemplateModel(S3Model):
                                                     name = name,
                                                     field_type = field_type,
                                                     options = options,
+                                                    #settings = settings,
                                                     require_not_empty = question.require_not_empty,
                                                     comments = question.comments,
                                                     )
@@ -511,6 +533,11 @@ class DataCollectionModel(S3Model):
         # Components
         add_components(tablename,
                        dc_response = "target_id",
+                       event_event = {"link": "event_target",
+                                      "joinby": "target_id",
+                                      "key": "event_id",
+                                      "actuate": "replace",
+                                      },
                        )
 
         # CRUD strings
@@ -545,7 +572,7 @@ class DataCollectionModel(S3Model):
                      self.super_link("doc_id", "doc_entity"),
                      target_id(),
                      template_id(),
-                     s3_date(default = "now"),
+                     s3_datetime(default = "now"),
                      location_id(),
                      self.org_organisation_id(),
                      self.pr_person_id(
@@ -558,7 +585,8 @@ class DataCollectionModel(S3Model):
         self.configure(tablename,
                        create_next = URL(f="respnse", args=["[id]", "answer"]),
                        # Question Answers are in a Dynamic Component
-                       dynamic_components = True,
+                       # - however they all have the same component name so add correct one in controller instead!
+                       #dynamic_components = True,
                        super_entity = "doc_entity",
                        orderby = "dc_response.date desc",
                        )
@@ -694,27 +722,114 @@ def dc_rheader(r, tabs=None):
             rheader_fields = [["template_id"],
                               ["location_id"],
                               ["date"],
+                              ["person_id"],
                               ]
 
-            if current.deployment_settings.has_module("event"):
-                ltable = s3db.event_response
-                f = ltable.event_id
-                def event_name(record):
-                    event = current.db(ltable.response_id == record.id).select(f,
-                                                                               limitby=(0, 1)
-                                                                               ).first()
-                    if event:
-                        return f.represent(event.event_id)
+            db = current.db
+
+            def contacts(record):
+                ptable = s3db.pr_person
+                ctable = s3db.pr_contact
+                query = (ptable.id == record.person_id) & \
+                        (ptable.pe_id == ctable.pe_id) & \
+                        (ctable.deleted == False)
+                data = db(query).select(ctable.value,
+                                        ctable.contact_method,
+                                        ctable.priority,
+                                        orderby = ~ctable.priority,
+                                        )
+                if data:
+                    # Prioritise Phone then Email
+                    email = None
+                    other = None
+                    for contact in data:
+                        if contact.contact_method == "SMS":
+                            return contact.value
+                        elif contact.contact_method == "Email":
+                            if not email:
+                                email = contact.value
+                        else:
+                            if not other:
+                                other = contact.value
+                    return email or other
+                else:
+                    # @ToDo: Provide an Edit button
+                    return A(T("Add"))
+
+            rheader_fields.append([(T("Contact Details"), contacts)])
+
+            has_module = current.deployment_settings.has_module
+            if has_module("stats"):
+                # @ToDo: deployment_setting, not just presence of module
+                def population(record):
+                    ptable = s3db.stats_demographic
+                    dtable = s3db.stats_demographic_data
+                    date_field = dtable.date
+                    value_field = dtable.value
+                    query = (ptable.name == "Population") & \
+                            (dtable.parameter_id == ptable.parameter_id) & \
+                            (dtable.location_id == record.location_id) & \
+                            (dtable.deleted == False)
+                    data = db(query).select(value_field,
+                                            date_field,
+                                            limitby=(0, 1),
+                                            orderby = ~date_field, # @ToDo: Handle case where system stores future predictions
+                                            ).first()
+                    if data:
+                        return value_field.represent(data.value)
                     else:
                         return ""
 
-                rheader_fields.insert(0, [(f.label, event_name)])
+                rheader_fields.insert(2, [(T("Total Population"), population)])
+
+            if has_module("event"):
+                etable = s3db.event_event
+                ltable = s3db.event_response
+                event_id = ltable.event_id
+                date_field = etable.start_date
+                query = (ltable.response_id == record.id) & \
+                        (etable.id == event_id)
+                event = db(query).select(etable.id,
+                                         date_field,
+                                         limitby=(0, 1)
+                                         ).first()
+                
+                def event_name(record):
+                    if event:
+                        return event_id.represent(event.id)
+                    else:
+                        return ""
+
+                def event_date(record):
+                    if event:
+                        return date_field.represent(event.start_date)
+                    else:
+                        return ""
+
+                def event_days(record):
+                    if event:
+                        timedelta = record.date - event.start_date
+                        return timedelta.days
+                    else:
+                        return ""
+
+                rheader_fields.insert(0, [(event_id.label, event_name)])
+                rheader_fields.insert(1, [(date_field.label, event_date)])
+                # @ToDo: deployment_setting
+                rheader_fields.insert(2, [(T("Number of Days since Event Occurred"), event_days)])
 
         elif tablename == "dc_target":
 
+            label = current.deployment_settings.get_dc_response_label()
+            if label == "Assessment":
+                RESPONSES = T("Assessments")
+            elif label == "Survey":
+                RESPONSES = T("Surveys")
+            else:
+                RESPONSES = T("Responses")
+        
             tabs = ((T("Basic Details"), None),
-                    # @ToDo: Use settings for label
-                    (T("Responses"), "response"),
+                    (RESPONSES, "response"),
                     )
 
             rheader_fields = (["template_id"],

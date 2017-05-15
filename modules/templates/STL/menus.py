@@ -148,6 +148,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                       vars = {"closed": "0"})(
                         M("Create", m="create"),
                         M("All Beneficiaries", vars = {}),
+                        M("Beneficiary Report", m="report"),
                         M(follow_up_label, f="due_followups"),
                         ),
                     M("Activities", link=False,
@@ -171,6 +172,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         ),
                     M("Administration", c="dvr", link=False,
                       restrict = (ADMIN, "ORG_ADMIN"))(
+                        M("Education Levels", c="pr", f="education_level"),
                         M("Beneficiary Types", f="beneficiary_type"),
                         #M("Evaluation Questions", f="evaluation_question"),
                         M("Housing Types", f="housing_type"),
@@ -220,7 +222,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                     M("Administration", c=("org", "project"), link=False,
                       restrict = (ADMIN, "ORG_ADMIN"))(
                         M("Organization Types", f="organisation_type"),
-                        M("Service Types", f="service"),
+                        M("Service Types", f="service", m="hierarchy"),
                         M("Facility Types", f="facility_type"),
                         M("Projects", c="project", f="project"),
                     ),

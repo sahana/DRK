@@ -5486,8 +5486,15 @@ def project_status_represent(value):
         @ToDo: Configurable thresholds
     """
 
-    if current.auth.permission.format == "geojson":
+    representation = current.auth.permission.format
+    if representation == "geojson":
         return value
+
+    # Represent the number
+    represent = IS_FLOAT_AMOUNT.represent(value, precision=2)
+
+    if representation in ("pdf", "xls"):
+        return represent
 
     if value >= 80:
         colour = "00ff00" # Green
@@ -5495,9 +5502,6 @@ def project_status_represent(value):
         colour = "ffff00" # Yellow
     else:
         colour = "ff0000" # Red
-
-    # Represent the number
-    represent = IS_FLOAT_AMOUNT.represent(value, precision=2)
 
     return SPAN(represent,
                 _class = "project_status",
@@ -5637,6 +5641,7 @@ class project_SummaryReport(S3Method):
                      )
 
         # Indicator Data
+        date = None
         table = s3db.project_indicator_data
         query = (table.project_id == project_id) & \
                 (table.end_date <= current.request.utcnow) & \
@@ -5730,7 +5735,11 @@ class project_SummaryReport(S3Method):
                                                                                limitby=(0, 1)
                                                                                ).first()
         if budget:
-            budget = "%s %s" % (budget.currency, budget.total_budget)
+            if hasattr(btable.currency, "represent"):
+                currency = btable.currency.represent(budget.currency)
+            else:
+                currency = budget.currency
+            budget = "%s %s" % (currency, budget.total_budget)
         else:
             budget = NONE
 
@@ -8007,7 +8016,7 @@ class S3ProjectTaskModel(S3Model):
                                  comment = S3PopupLink(c = "project",
                                                        f = "tag",
                                                        title = ADD_TAG,
-                                                       tooltip = T("A project tag helps to assosiate keywords with projects/tasks."),
+                                                       tooltip = T("A project tag helps to associate keywords with projects/tasks."),
                                                        ),
                                  )
 
@@ -8121,6 +8130,7 @@ class S3ProjectTaskModel(S3Model):
                            writable = staff,
                            ),
                      Field.Method("task_id", self.project_task_task_id),
+                     s3_comments(),
                      *s3_meta_fields(),
                      on_define = lambda table: \
                         [table.created_on.set_attributes(represent = lambda dt: \
@@ -8317,9 +8327,12 @@ class S3ProjectTaskModel(S3Model):
                                           orderby = "date"
                                           ),
                      "time_actual",
+                     "comments",
                      ))
         else:
-            cappend("status")
+            cextend(("status",
+                     "comments",
+                     ))
 
         # Custom Form
         crud_form = S3SQLCustomForm(*crud_fields)

@@ -343,6 +343,26 @@ def person():
     return s3_rest_controller("pr", "person", rheader = s3db.dvr_rheader)
 
 # -----------------------------------------------------------------------------
+def person_search():
+    """
+        RESTful controller for autocomplete-searches
+    """
+
+    def prep(r):
+
+        if r.method != "search_ac":
+            return False
+
+        # Filter to persons who have a case registered
+        resource = r.resource
+        resource.add_filter(FS("dvr_case.id") != None)
+        return True
+
+    s3.prep = prep
+
+    return s3_rest_controller("pr", "person")
+
+# -----------------------------------------------------------------------------
 def group_membership():
     """
         RESTful CRUD controller for person<=>group links, normally called
@@ -796,6 +816,11 @@ def note():
         field = s3db.dvr_note.person_id
         field.default = person_id
         field.readable = field.writable = False
+
+    return s3_rest_controller()
+
+def note_type():
+    """ Note Types: RESTful CRUD Controller """
 
     return s3_rest_controller()
 

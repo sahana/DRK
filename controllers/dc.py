@@ -88,22 +88,55 @@ def target():
                 f = table.template_id
                 f.default = record.template_id
                 f.writable = False
+                f.comment = None
+
+                # Open in native controller (cannot just set native as can't call this 'response')
+                s3db.configure("dc_response",
+                               linkto = lambda record_id: URL(f="respnse", args=[record_id, "read"]),
+                               linkto_update = lambda record_id: URL(f="respnse", args=[record_id, "update"]),
+                               )
 
         return True
     s3.prep = prep
 
-    return s3_rest_controller(rheader = s3db.dc_rheader)
+    return s3_rest_controller(rheader = s3db.dc_rheader,
+                              )
 
 # -----------------------------------------------------------------------------
 def respnse(): # Cannot call this 'response' or it will clobber the global
     """ RESTful CRUD controller """
+
+    # All templates use the same component name for answers so need to add the right component manually
+    try:
+        response_id = int(request.args(0))
+    except:
+        # Multiple record method
+        pass
+    else:
+        dtable = s3db.s3_table
+        rtable = s3db.dc_response
+        ttable = s3db.dc_template
+        query = (rtable.id == response_id) & \
+                (rtable.template_id == ttable.id) & \
+                (ttable.table_id == dtable.id)
+        template = db(query).select(dtable.name,
+                                    limitby=(0, 1),
+                                    ).first()
+        dtablename = template.name
+        components = {dtablename: {"name": "answer",
+                                   "joinby": "response_id",
+                                   "multiple": False,
+                                   }
+                      }
+        s3db.add_components("dc_response", **components)
 
     # Pre-process
     def prep(r):
         if r.interactive:
             if r.component_name == "answer":
                 # CRUD Strings
-                s3.crud_strings[r.component.tablename] = Storage(
+                tablename = r.component.tablename
+                s3.crud_strings[tablename] = Storage(
                     label_create = T("Create Responses"),
                     title_display = T("Response Details"),
                     title_list = T("Responses"),
@@ -281,7 +314,7 @@ def respnse(): # Cannot call this 'response' or it will clobber the global
                                 cappend(fname)
 
                 crud_form = S3SQLCustomForm(*crud_fields)
-                s3db.configure(r.component.tablename,
+                s3db.configure(tablename,
                                crud_form = crud_form,
                                subheadings = subheadings,
                                )

@@ -1349,6 +1349,12 @@ class S3CalendarWidget(FormWidget):
         @note: this widget must be combined with the IS_UTC_DATE or
                IS_UTC_DATETIME validators to have the value properly
                converted from/to local timezone and format.
+
+        - control script is s3.ui.calendar.js
+        - uses jQuery UI DatePicker for Gregorian calendars: https://jqueryui.com/datepicker/
+        - uses jQuery UI Timepicker-addon if using times: http://trentrichardson.com/examples/timepicker
+        - uses Calendars for non-Gregorian calendars: http://keith-wood.name/calendars.html
+            (ensure that calendars/ui-smoothness.calendars.picker.css is in css.cfg for that)
     """
 
     def __init__(self,
@@ -8794,6 +8800,8 @@ class ICON(I):
     # - "_base" can be used to define a common CSS class for all icons
     #
     icons = {
+        # Font-Awesome 4
+        # http://fontawesome.io/icons/
         "font-awesome": {
             "_base": "fa",
             "active": "fa-check",
@@ -8811,6 +8819,7 @@ class ICON(I):
             "bookmark-empty": "fa-bookmark-o",
             "briefcase": "fa-briefcase",
             "calendar": "fa-calendar",
+            "caret-right": "fa-caret-right",
             "certificate": "fa-certificate",
             "comment-alt": "fa-comment-o",
             "commit": "fa-check-square-o",
@@ -8852,6 +8861,7 @@ class ICON(I):
             "paper-clip": "fa-paperclip",
             "pencil": "fa-pencil",
             "phone": "fa-phone",
+            "play": "fa-play",
             "plus": "fa-plus",
             "plus-sign": "fa-plus-sign",
             "project": "fa-dashboard",
@@ -8884,6 +8894,8 @@ class ICON(I):
             "zoomin": "fa-zoomin",
             "zoomout": "fa-zoomout",
         },
+        # Foundation Icon Fonts 3
+        # http://zurb.com/playground/foundation-icon-fonts-3
         "foundation": {
             "active": "fi-check",
             "activity": "fi-price-tag",
@@ -8895,6 +8907,7 @@ class ICON(I):
             "bookmark": "fi-bookmark",
             "bookmark-empty": "fi-bookmark-empty",
             "calendar": "fi-calendar",
+            "caret-right": "fi-play",
             "certificate": "fi-burst",
             "comment-alt": "fi-comment",
             "commit": "fi-check",
@@ -8927,6 +8940,7 @@ class ICON(I):
             "paper-clip": "fi-paperclip",
             "pencil": "fi-pencil",
             "phone": "fi-telephone",
+            "play": "fi-play",
             "plus": "fi-plus",
             "plus-sign": "fi-plus",
             "print": "fi-print",
@@ -8953,6 +8967,8 @@ class ICON(I):
             "zoomin": "fi-zoom-in",
             "zoomout": "fi-zoom-out",
         },
+        # Font-Awesome 3
+        # http://fontawesome.io/3.2.1/icons/
         "font-awesome3": {
             "_base": "icon",
             "active": "icon-check",
@@ -8967,6 +8983,7 @@ class ICON(I):
             "bookmark-empty": "icon-bookmark-empty",
             "briefcase": "icon-briefcase",
             "calendar": "icon-calendar",
+            "caret-right": "icon-caret-right",
             "certificate": "icon-certificate",
             "comment-alt": "icon-comment-alt",
             "commit": "icon-truck",
@@ -9000,6 +9017,7 @@ class ICON(I):
             "paper-clip": "icon-paper-clip",
             "pencil": "icon-pencil",
             "phone": "icon-phone",
+            "play": "icon-play",
             "plus": "icon-plus",
             "plus-sign": "icon-plus-sign",
             "print": "icon-print",

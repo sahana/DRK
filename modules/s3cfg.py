@@ -2756,6 +2756,13 @@ class S3Config(Storage):
         """
         return self.dc.get("response_label", "Assessment")
 
+    def get_dc_mobile_data(self):
+        """
+            Whether Mobile Clients should download Assessments
+            - e.g. when these are created through Targetting
+        """
+        return self.dc.get("mobile_data", False)
+
     # -------------------------------------------------------------------------
     # Deployments
     #
@@ -2936,6 +2943,15 @@ class S3Config(Storage):
             not checked-in
         """
         return self.dvr.get("event_registration_checkin_warning", False)
+
+    def get_dvr_event_registration_show_picture(self):
+        """
+            Event registration UI to show profile picture
+            by default (True), or only on demand (False):
+            - can be set to False (selectively) in order to improve
+              responsiveness of the UI and reduce network traffic
+        """
+        return self.dvr.get("event_registration_show_picture", True)
 
     def get_dvr_activity_use_service_type(self):
         """

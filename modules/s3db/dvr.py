@@ -608,10 +608,19 @@ class DVRCaseModel(S3Model):
                            label = T("Officially Registered"),
                            represent = s3_yes_no_represent,
                            ),
+                     Field("enrolled_in_school", "boolean",
+                           default = False,
+                           label = T("Enrolled in Public School"),
+                           represent = s3_yes_no_represent,
+                           ),
                      s3_date("arrival_date",
                              label = T("Arrival Date"),
                              ),
                      self.dvr_referral_type_id(),
+                     self.dvr_referral_type_id(
+                         "activity_referral_type_id",
+                         label = T("Referred to Group Activities by"),
+                         ),
                      *s3_meta_fields())
 
         # ---------------------------------------------------------------------
@@ -1731,7 +1740,7 @@ class DVRCaseActivityModel(S3Model):
         define_table(tablename,
                      self.super_link("doc_id", "doc_entity"),
                      service_id(label = T("Service Type"),
-                                ondelete = "SET NULL",
+                                ondelete = "RESTRICT",
                                 readable = service_type,
                                 writable = service_type,
                                 ),
@@ -1947,11 +1956,13 @@ class DVRCaseActivityModel(S3Model):
                      s3_date("start_date",
                              label = T("Registered on"),
                              default = "now",
+                             set_min = "#dvr_case_activity_end_date",
                              ),
                      s3_date("end_date",
                              label = T("Completed on"),
                              readable = False,
                              writable = False,
+                             set_max = "#dvr_case_activity_start_date",
                              ),
                      self.dvr_need_id(readable = not multiple_needs,
                                       writable = not multiple_needs,
@@ -2005,7 +2016,7 @@ class DVRCaseActivityModel(S3Model):
                                 writable = False,
                                 ),
                      service_id(label = T("Service Type"),
-                                ondelete = "SET NULL",
+                                ondelete = "RESTRICT",
                                 readable = service_type,
                                 writable = service_type,
                                 ),
@@ -2187,6 +2198,7 @@ class DVRCaseActivityModel(S3Model):
                   filter_widgets = filter_widgets,
                   list_fields = list_fields,
                   onaccept = self.case_activity_onaccept,
+                  onvalidation = self.case_activity_onvalidation,
                   orderby = "dvr_case_activity.start_date desc",
                   report_options = report_options,
                   super_entity = "doc_entity",
@@ -2289,6 +2301,26 @@ class DVRCaseActivityModel(S3Model):
                 "dvr_case_activity_id": lambda name="case_activity_id", **attr: \
                                                dummy(name, **attr),
                 }
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def case_activity_onvalidation(form):
+        """
+            Validate case activity form:
+                - end date must be after start date
+        """
+
+        T = current.T
+
+        form_vars = form.vars
+        try:
+            start = form_vars.start_date
+            end = form_vars.end_date
+        except AttributeError:
+            return
+
+        if start and end and end < start:
+            form.errors["end_date"] = T("End date must be after start date")
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -4057,6 +4089,13 @@ class DVRVulnerabilityModel(S3Model):
                            readable = hierarchical_vulnerability_types,
                            writable = hierarchical_vulnerability_types,
                            ),
+                     Field("required", "boolean",
+                           default = False,
+                           label = T("Required Category"),
+                           represent = s3_yes_no_represent,
+                           readable = False,
+                           writable = False,
+                           ),
                      s3_comments(),
                      *s3_meta_fields())
 
@@ -4969,7 +5008,7 @@ def dvr_get_household_size(person_id, dob=False, formatted=True):
     now = current.request.utcnow.date()
 
     # Default result
-    adults, children = 1, 0
+    adults, children, children_u1 = 1, 0, 0
 
     # Count the person in question
     if dob is False:
@@ -4983,6 +5022,8 @@ def dvr_get_household_size(person_id, dob=False, formatted=True):
         age = relativedelta(now, dob).years
         if age < 18:
             adults, children = 0, 1
+            if age < 1:
+                children_u1 = 1
 
     # Household members which have already been counted
     members = set([person_id])
@@ -5019,12 +5060,14 @@ def dvr_get_household_size(person_id, dob=False, formatted=True):
                 age = relativedelta(now, dob).years if dob else None
                 if age is not None and age < 18:
                     children += 1
+                    if age < 1:
+                        children_u1 += 1
                 else:
                     adults += 1
                 counted(person)
 
     if not formatted:
-        return adults, children
+        return adults, children, children_u1
 
     T = current.T
     template = "%(number)s %(label)s"
@@ -5039,7 +5082,20 @@ def dvr_get_household_size(person_id, dob=False, formatted=True):
         details.append(template % {"number": children,
                                    "label": label,
                                    })
-    return ", ".join(details)
+    details = ", ".join(details)
+
+    if children_u1:
+        if children_u1 == 1:
+            label = T("Child under 1 year")
+        else:
+            label = T("Children under 1 year")
+        details = "%s (%s)" % (details,
+                               template % {"number": children_u1,
+                                           "label": label,
+                                           },
+                               )
+
+    return details
 
 # =============================================================================
 class DVRRegisterCaseEvent(S3Method):
@@ -5047,9 +5103,6 @@ class DVRRegisterCaseEvent(S3Method):
 
     # Action to check flag restrictions for
     ACTION = "id-check"
-
-    # Whether to show profile picture by default
-    SHOW_PICTURE = False
 
     # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
@@ -5288,13 +5341,16 @@ class DVRRegisterCaseEvent(S3Method):
         # Custom view
         response.view = self._view(r, "dvr/register_case_event.html")
 
+        # Show profile picture by default or only on demand?
+        show_picture = settings.get_dvr_event_registration_show_picture()
+
         # Inject JS
         options = {"tablename": resourcename,
                    "ajaxURL": r.url(None,
                                     method = "register",
                                     representation = "json",
                                     ),
-                   "showPicture": self.SHOW_PICTURE,
+                   "showPicture": show_picture,
                    "showPictureText": s3_str(T("Show Picture")),
                    "hidePictureText": s3_str(T("Hide Picture")),
                    }
@@ -6194,9 +6250,6 @@ class DVRRegisterPayment(DVRRegisterCaseEvent):
 
     # Do not check minimum intervals for consecutive registrations
     check_intervals = False
-
-    # Show profile picture by default
-    SHOW_PICTURE = True
 
     # -------------------------------------------------------------------------
     # Configuration

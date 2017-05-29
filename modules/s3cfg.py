@@ -4,7 +4,7 @@
 
     @requires: U{B{I{gluon}} <http://web2py.com>}
 
-    @copyright: 2009-2016 (c) Sahana Software Foundation
+    @copyright: 2009-2017 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -2416,12 +2416,6 @@ class S3Config(Storage):
     # -------------------------------------------------------------------------
     # CAP: Common Alerting Protocol
     #
-    def get_cap_identifier_prefix(self):
-        """
-            Prefix to be prepended to identifiers of CAP alerts
-        """
-        return self.cap.get("identifier_prefix", "")
-
     def get_cap_identifier_oid(self):
         """
             OID for the CAP issuing authority
@@ -2441,12 +2435,6 @@ class S3Config(Storage):
 
         # Else fallback to the default OID
         return self.cap.get("identifier_oid", "")
-
-    def get_cap_identifier_suffix(self):
-        """
-            Suffix to be appended to identifiers of CAP alerts
-        """
-        return self.cap.get("identifier_suffix", "")
 
     def get_cap_expire_offset(self):
         """
@@ -2578,6 +2566,15 @@ class S3Config(Storage):
         """
 
         return self.cap.get("alert_hub_title", current.T("SAMBRO Alert Hub Common Operating Picture"))
+
+    def get_cap_area_default(self):
+        """
+            During importing from XML, which element(s) to use for the
+            record in cap_area_location table
+            elements are <polygon> and <geocode>
+        """
+
+        return self.cap.get("area_default", ["geocode", "polygon"])
 
     # -------------------------------------------------------------------------
     # CMS: Content Management System
@@ -2963,6 +2960,16 @@ class S3Config(Storage):
               responsiveness of the UI and reduce network traffic
         """
         return self.dvr.get("event_registration_show_picture", True)
+
+    def get_dvr_event_registration_exclude_codes(self):
+        """
+            List of case event type codes to exclude from
+            the event registration UI; can use * as wildcard
+
+            Example:
+                settings.dvr.event_registration_exclude_codes = ("FOOD*",)
+        """
+        return self.dvr.get("event_registration_exclude_codes", None)
 
     def get_dvr_activity_use_service_type(self):
         """

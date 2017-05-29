@@ -2,7 +2,7 @@
 
 """ Sahana Eden Organisation Model
 
-    @copyright: 2009-2016 (c) Sahana Software Foundation
+    @copyright: 2009-2017 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -5078,7 +5078,7 @@ def org_organisation_logo(id,
         #if type == "bmp":
         #    format = "bmp"
         size = (None, 60)
-        image = s3db.pr_image_represent(record.logo, size=size)
+        image = s3db.pr_image_library_represent(record.logo, size=size)
         url_small = URL(c="default", f="download", args=image)
         if record.acronym is None or record.acronym == "":
             alt = "%s logo" % record.name
@@ -8295,7 +8295,7 @@ def org_logo_represent(org = None,
             if logo:
                 # Select resized version if-available
                 size = (width, None)
-                image = s3db.pr_image_represent(logo, size=size)
+                image = s3db.pr_image_library_represent(logo, size=size)
                 url_small = URL(c="default", f="download", args=image)
                 alt = "%s logo" % org
                 logo = IMG(_src=url_small, _alt=alt, _width=width)

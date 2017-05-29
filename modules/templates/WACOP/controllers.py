@@ -1954,7 +1954,7 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
                                ))
 
     # Comments
-    comment_list = UL()
+    comment_list = UL(_class="card-post-comments")
     cappend = comment_list.append
 
     #if settings.get_cms_comments():
@@ -1993,12 +1993,13 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
                                       DIV(comment.body,
                                           _class="desc",
                                           ),
-                                      TAG["FOOTER"](P(A(T("More Info"),
-                                                        _class="more",
-                                                        )
-                                                      ),
-                                                    _class="footer",
-                                                    ),
+                                      # @ToDo: Show this if more than x chars?
+                                      #TAG["FOOTER"](P(A(T("More Info"),
+                                      #                  _class="more",
+                                      #                  )
+                                      #                ),
+                                      #              _class="footer",
+                                      #              ),
                                       _class="card-post-comment",
                                       ))
             cappend(comment)
@@ -2073,13 +2074,13 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
                             _class="body",
                             ),
                         docs,
-                        TAG["FOOTER"](P(tag_list,
-                                        _class="tags",
+                        TAG["FOOTER"](DIV(tag_list,
+                                        _class="tags clearfix", # @ToDo: remove clearfix and style via CSS
                                         ),
+                                      comment_list,
                                       add_comment,
                                       _class="footer",
                                       ),
-                        comment_list,
                         _class="card-post",
                         _id=item_id,
                         )

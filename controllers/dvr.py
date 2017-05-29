@@ -82,6 +82,16 @@ def person():
             archived = False
             status_opts = s3db.dvr_case_status_filter_opts
 
+            # Set default for dvr_case_effort.person_id and hide it
+            etable = s3db.dvr_case_effort
+            field = etable.person_id
+            field.default = r.record.id
+            field.readable = field.writable = False
+
+            # Set default for dvr_case_effort.human_resource_id
+            field = etable.human_resource_id
+            field.default = auth.s3_logged_in_human_resource()
+
         # Should not be able to delete records in this view
         resource.configure(deletable = False)
 
@@ -141,6 +151,12 @@ def person():
 
             if not r.component:
 
+                from s3 import S3SQLCustomForm, \
+                               S3SQLInlineComponent, \
+                               S3TextFilter, \
+                               S3OptionsFilter, \
+                               s3_get_filter_opts
+
                 # Expose the "archived"-flag? (update forms only)
                 if r.record and r.method != "read":
                     ctable = s3db.dvr_case
@@ -151,7 +167,6 @@ def person():
                 # NB: this assumes single case per person, must use
                 #     case perspective (dvr/case) for multiple cases
                 #     per person!
-                from s3 import S3SQLCustomForm, S3SQLInlineComponent
                 crud_form = S3SQLCustomForm(
                                 "dvr_case.reference",
                                 "dvr_case.organisation_id",
@@ -201,7 +216,6 @@ def person():
                                 )
 
                 # Module-specific filter widgets
-                from s3 import s3_get_filter_opts, S3TextFilter, S3OptionsFilter
                 filter_widgets = [
                     S3TextFilter(["pe_label",
                                   "first_name",
@@ -276,7 +290,8 @@ def person():
                             field.comment = None
 
             elif r.component_name == "evaluation":
-                S3SQLInlineComponent = s3base.S3SQLInlineComponent
+
+                from s3 import S3SQLInlineComponent
 
                 crud_fields = [#"person_id",
                                #"case_id",
@@ -615,6 +630,23 @@ def response_type():
 # -----------------------------------------------------------------------------
 def termination_type():
     """ Termination Types: RESTful CRUD Controller """
+
+    def prep(r):
+
+        if settings.get_dvr_activity_use_service_type() and \
+           settings.get_org_services_hierarchical():
+
+            # Limit the selection to root services (case activity
+            # threads are usually per root service type, and all
+            # sub-categories should use a common exit type taxonomy)
+            field = r.table.service_id
+            query = (db.org_service.parent == None)
+            field.requires = IS_EMPTY_OR(IS_ONE_OF(db(query),
+                                                   "org_service.id",
+                                                   field.represent,
+                                                   ))
+        return True
+    s3.prep = prep
 
     return s3_rest_controller()
 

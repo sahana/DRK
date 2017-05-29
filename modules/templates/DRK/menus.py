@@ -72,12 +72,18 @@ class S3MainMenu(default.S3MainMenu):
                    # Show only if not authorized to see "Residents"
                    check = lambda this: not this.preceding()[-1].check_permission(),
                    ),
-                MM("Food Distribution Statistics", c="dvr", f="case_event",
-                   m = "report",
-                   vars = {"code": "FOOD"},
-                   restrict = ("FOOD_STATS",),
+                MM("Food Distribution", c="dvr", f="case_event",
+                   m = "register_food",
+                   p = "create",
                    # Show only if not authorized to see "Residents"
                    check = lambda this: not this.preceding()[-2].check_permission(),
+                   ),
+                MM("Food Distribution Statistics", c="dvr", f="case_event",
+                   m = "report",
+                   vars = {"code": "FOOD*"},
+                   restrict = ("FOOD_STATS",),
+                   # Show only if not authorized to see "Residents"
+                   check = lambda this: not this.preceding()[-3].check_permission(),
                    ),
                 MM("ToDo", c="project", f="task"),
                 MM("Dashboard", c="cr", f="shelter",
@@ -274,7 +280,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("Food Distribution Statistics", c="dvr", f="case_event",
                           m = "report",
                           restrict = (ADMIN, "ADMINISTRATION", "ADMIN_HEAD", "SECURITY_HEAD", "RP"),
-                          vars = {"code": "FOOD"},
+                          vars = {"code": "FOOD*"},
                           ),
                         ),
                     M("Activities", f="case_activity")(
@@ -301,6 +307,8 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("Import", m="import", p="create"),
                         ),
                     M("Event Registration", c="dvr", f="case_event", m="register", p="create")(
+                        ),
+                    M("Food Distribution", c="dvr", f="case_event", m="register_food", p="create")(
                         ),
                     M("Archive", link=False)(
                         M("Closed Cases", f="person",

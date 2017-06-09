@@ -1977,6 +1977,48 @@ def config(settings):
     settings.customise_pr_education_level_resource = customise_pr_education_level_resource
 
     # -------------------------------------------------------------------------
+    def person_tag_onvalidation(form):
+        """
+            Custom onvalidation callback for person tags
+            => INDIVIDUAL_ID must be unique
+        """
+
+        formvars = form.vars
+
+        tag = formvars.tag
+        value = formvars.value
+
+        if tag != "INDIVIDUAL_ID" or value is None:
+            return
+
+        # Is this an update?
+        if "id" in formvars:
+            record_id = formvars.id
+        elif "_id" in formvars:
+            # Inline component
+            record_id = formvars._id
+        elif hasattr(form, "record_id"):
+            record_id = form.record_id
+        else:
+            # New record
+            record_id = None
+
+        # Find a duplicate
+        table = current.s3db.pr_person_tag
+        query = (table.tag == "INDIVIDUAL_ID") & \
+                (table.value == value) & \
+                (table.deleted == False)
+        if record_id:
+            query &= (table.id != record_id)
+        duplicate = current.db(query).select(table.id,
+                                             limitby = (0, 1),
+                                             ).first()
+
+        # Reject if duplicate exists
+        if duplicate:
+            form.errors["value"] = current.T("ID already in database")
+
+    # -------------------------------------------------------------------------
     def customise_pr_person_resource(r, tablename):
 
         s3db = current.s3db
@@ -2073,6 +2115,12 @@ def config(settings):
             if isinstance(requires, IS_EMPTY_OR):
                 field.requires = requires.other
 
+            # Custom validator for person tags
+            s3db.add_custom_callback("pr_person_tag",
+                                     "onvalidation",
+                                     person_tag_onvalidation,
+                                     )
+
     settings.customise_pr_person_resource = customise_pr_person_resource
 
     # -------------------------------------------------------------------------
@@ -2099,6 +2147,65 @@ def config(settings):
             error = msg
 
         return value, error
+
+    # -------------------------------------------------------------------------
+    def set_default_pe_label():
+        """
+            Attempt to auto-generate a beneficiary reference number
+            for the logged-in staff member, using the Staff ID (code)
+            plus a n-digit number as pattern
+        """
+
+        db = current.db
+        auth = current.auth
+        s3db = current.s3db
+
+        ptable = s3db.pr_person
+        htable = s3db.hrm_human_resource
+
+        # Number of trailing digits
+        DIGITS = 4
+
+        # Get the staff ID of the logged-in user
+        code = None
+        if auth.s3_logged_in() and auth.user:
+            query = (ptable.pe_id == auth.user.pe_id) & \
+                    (htable.person_id == ptable.id) & \
+                    (htable.deleted == False)
+            row = db(query).select(htable.code,
+                                   orderby = ~htable.modified_on,
+                                   limitby = (0, 1),
+                                   ).first()
+            if row:
+                code = row.code
+
+        if not code:
+            # No staff ID => can not auto-generate reference number
+            return
+
+        # Get the highest reference number with that staff code
+        query = (ptable.pe_label.like("%s%s" % (code, "_" * DIGITS))) & \
+                (ptable.pe_label >= "%s%s1" % (code, "0" * (DIGITS -1))) & \
+                (ptable.pe_label <= "%s%s" % (code, "9" * DIGITS)) & \
+                (ptable.deleted == False)
+        highest = ptable.pe_label.max()
+        row = db(query).select(highest).first()
+
+        if not row or not row[highest]:
+            # No such reference number yet => start with 1
+            next_id = 1
+        else:
+            try:
+                last_id = int(row[highest][-DIGITS:])
+            except ValueError:
+                next_id = None
+            else:
+                # Increment it
+                next_id = last_id + 1 if last_id < (10 ** DIGITS - 1) else None
+
+        if next_id:
+            template = "%%s%%0%sd" % DIGITS
+            ptable.pe_label.default = template % (code, next_id)
 
     # -------------------------------------------------------------------------
     def customise_pr_person_controller(**attr):
@@ -2210,6 +2317,10 @@ def config(settings):
                 if not r.component:
 
                     from s3 import IS_ONE_OF, S3HierarchyWidget
+
+                    if r.interactive and not r.record and \
+                       r.method == "create" or not r.method:
+                        set_default_pe_label()
 
                     ctable = s3db.dvr_case
 
@@ -2613,6 +2724,7 @@ def config(settings):
     # =========================================================================
     # Staff Module
     #
+    settings.hrm.use_code = True
     settings.hrm.use_skills = False
     settings.hrm.use_address = False
     settings.hrm.use_certificates = False
@@ -2659,6 +2771,7 @@ def config(settings):
 
                 # Custom list fields
                 list_fields = ["person_id",
+                               "code",
                                "job_title_id",
                                "organisation_id",
                                (T("Email"), "email.value"),

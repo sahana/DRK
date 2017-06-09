@@ -309,6 +309,8 @@ class custom_WACOP(S3CRUD):
                                    collapsed = True,
                                    callback='''S3.search.s3map()''',
                                    feature_resources = feature_resources,
+                                   toolbar = True,
+                                   add_polygon = True,
                                    )
 
         return map
@@ -730,7 +732,8 @@ class custom_WACOP(S3CRUD):
         s3 = current.response.s3
 
         list_id = "updates_datalist"
-        ajax_vars = {"refresh": list_id,
+        ajax_vars = {"list_id": list_id,
+                     #"refresh": list_id,
                      }
 
         tablename = "cms_post"
@@ -755,7 +758,8 @@ class custom_WACOP(S3CRUD):
                                                    start=None,
                                                    limit=5,
                                                    list_id=list_id,
-                                                   orderby="date desc",
+                                                   # This is the default but needs specifying when talking direct to the back-end
+                                                   orderby="cms_post.date desc",
                                                    layout=cms_post_list_layout)
 
         s3.dl_no_header = True
@@ -791,23 +795,30 @@ class custom_WACOP(S3CRUD):
         # Widgets defined in customise() to be visible to filter.options
         filter_widgets = s3db.get_config(tablename, "filter_widgets")
 
-        ajax_vars.pop("refresh")
+        ajax_vars.pop("list_id")
+        #ajax_vars.pop("refresh")
         filter_form = S3FilterForm(filter_widgets,
                                    formstyle = filter_formstyle_profile,
                                    submit = True,
                                    ajax = True,
                                    url = ajaxurl,
-                                   # Ensure that Filter options update when entries are added/modified
+                                   # Ensure that Filter options update when
+                                   # entries are added/modified
+                                   # => done through target-parameter in html() now,
+                                   #    but /a/ form ID is still required for other
+                                   #    scripts and styles
                                    _id = "%s-filter-form" % list_id,
-                                   ajaxurl = URL(c="cms", f="post",
-                                                 args=["filter.options"],
-                                                 vars=ajax_vars, # manually applied to s3.filter in customise()
+                                   ajaxurl = URL(c = "cms",
+                                                 f = "post",
+                                                 args = ["filter.options"],
+                                                 vars = ajax_vars, # manually applied to s3.filter in customise()
                                                  ),
                                    )
 
         output["filter_form"] = filter_form.html(resource, r.get_vars,
-                                                 target="updates_datalist",
-                                                 alias=None)
+                                                 target = list_id,
+                                                 alias = None,
+                                                 )
 
         #  Create Form for Updates
         has_permission = current.auth.s3_has_permission
@@ -815,12 +826,12 @@ class custom_WACOP(S3CRUD):
             if event_id:
                 url = URL(c="event", f="event",
                           args = [event_id, "post", "create.popup"],
-                          vars={"refresh": "updates_datalist"},
+                          vars={"refresh": list_id},
                           )
             elif incident_id:
                 url = URL(c="event", f="incident",
                           args = [incident_id, "post", "create.popup"],
-                          vars={"refresh": "updates_datalist"},
+                          vars={"refresh": list_id},
                           )
             else:
                 # Update doesn't make sense here
@@ -929,6 +940,7 @@ class event_Browse(custom_WACOP):
                                    label = "",
                                    #hide_time = True,
                                    slider = True,
+                                   clear_text = "X",
                                    )
         date_filter.input_labels = {"ge": "Start Time/Date", "le": "End Time/Date"}
 
@@ -1042,6 +1054,7 @@ class incident_Browse(custom_WACOP):
                                    label = "",
                                    #hide_time = True,
                                    slider = True,
+                                   clear_text = "X",
                                    )
         date_filter.input_labels = {"ge": "Start Time/Date", "le": "End Time/Date"}
 

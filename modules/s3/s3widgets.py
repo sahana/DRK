@@ -1378,6 +1378,7 @@ class S3CalendarWidget(FormWidget):
                  minute_step=5,
                  set_min=None,
                  set_max=None,
+                 clear_text=None,
                  ):
         """
             Constructor
@@ -1442,6 +1443,8 @@ class S3CalendarWidget(FormWidget):
         self.set_min = set_min
         self.set_max = set_max
 
+        self.clear_text = clear_text
+
         self._class = "s3-calendar-widget datetimepicker"
 
     # -------------------------------------------------------------------------
@@ -1504,6 +1507,11 @@ class S3CalendarWidget(FormWidget):
         extremes = self.extremes(dtformat=dtformat)
 
         T = current.T
+        clear_text = self.clear_text
+        if clear_text is None:
+            clear_text = s3_str(T("Clear"))
+        else:
+            clear_text = s3_str(T(clear_text))
         options = {"calendar": calendar,
                    "dateFormat": str(date_format),
                    "timeFormat": str(time_format),
@@ -1515,10 +1523,10 @@ class S3CalendarWidget(FormWidget):
                    "weekNumber": self.week_number,
                    "timepicker": self.timepicker,
                    "minuteStep": self.minute_step,
-                   "todayText": str(T("Today")),
-                   "nowText": str(T("Now")),
-                   "closeText": str(T("Done")),
-                   "clearText": str(T("Clear")),
+                   "todayText": s3_str(T("Today")),
+                   "nowText": s3_str(T("Now")),
+                   "closeText": s3_str(T("Done")),
+                   "clearText": clear_text,
                    "setMin": self.set_min,
                    "setMax": self.set_max,
                    }
@@ -6609,7 +6617,7 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
                     current.log.error(error)
             if form.errors:
                 errors = form.errors
-                error = "\n".join(errors[fn] for fn in errors)
+                error = "\n".join(s3_str(errors[fn]) for fn in errors)
                 return (values, error)
             elif feature:
                 # gis_location_onvalidation adds/updates form vars (e.g.
@@ -8866,6 +8874,7 @@ class ICON(I):
             "play": "fa-play",
             "plus": "fa-plus",
             "plus-sign": "fa-plus-sign",
+            "print": "fa-print",
             "project": "fa-dashboard",
             "radio": "fa-microphone",
             "remove": "fa-remove",

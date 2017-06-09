@@ -380,7 +380,8 @@ def config(settings):
                                           #"comment.created_on",
                                           ],
                            list_layout = cms_post_list_layout,
-                           orderby = "cms_post.date desc",
+                           # Default
+                           #orderby = "cms_post.date desc",
                            )
 
             if method in ("custom", "filter"):
@@ -404,6 +405,7 @@ def config(settings):
                                            label = "",
                                            #hide_time = True,
                                            slider = True,
+                                           clear_text = "X",
                                            )
                 date_filter.input_labels = {"ge": "Start Time/Date", "le": "End Time/Date"}
 

@@ -31,6 +31,7 @@ __all__ = ("S3ContentModel",
            "S3ContentMapModel",
            "S3ContentOrgModel",
            "S3ContentOrgGroupModel",
+           "S3ContentTeamModel",
            "S3ContentUserModel",
            "cms_index",
            "cms_documentation",
@@ -446,7 +447,7 @@ class S3ContentModel(S3Model):
                                                       "multiple": False,
                                                       },
 
-                       # For InlineForm to tag Posts to Events/Incidents/Incident Types
+                       # For InlineForm to tag Posts to Events/Incidents/Incident Types/Teams
                        event_post = (# Events
                                      {"name": "event_post",
                                       "joinby": "post_id",
@@ -457,6 +458,13 @@ class S3ContentModel(S3Model):
                                       }
                                      ),
                        event_post_incident_type = "post_id",
+
+                       pr_group = {"link": "cms_post_team",
+                                   "joinby": "group_id",
+                                   "key": "incident_type_id",
+                                   "actuate": "hide",
+                                   },
+                       cms_post_team = "post_id",
 
                        # For Profile to filter appropriately
                        event_event = {"link": "event_post",
@@ -1006,6 +1014,34 @@ class S3ContentOrgGroupModel(S3Model):
         self.define_table(tablename,
                           self.cms_post_id(empty=False),
                           self.org_group_id(empty=False),
+                          *s3_meta_fields())
+
+        # ---------------------------------------------------------------------
+        # Pass names back to global scope (s3.*)
+        #
+        return {}
+
+# =============================================================================
+class S3ContentTeamModel(S3Model):
+    """
+        Link Posts to Teams
+    """
+
+    names = ("cms_post_team",)
+
+    def model(self):
+
+        # ---------------------------------------------------------------------
+        # Teams <> Posts link table
+        #
+        tablename = "cms_post_team"
+        self.define_table(tablename,
+                          self.cms_post_id(empty = False,
+                                           ondelete = "CASCADE",
+                                           ),
+                          self.pr_group_id(empty = False,
+                                           ondelete = "CASCADE",
+                                           ),
                           *s3_meta_fields())
 
         # ---------------------------------------------------------------------

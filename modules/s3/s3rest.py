@@ -32,12 +32,10 @@ __all__ = ("S3Request",
            "s3_request",
            )
 
-import datetime
 import json
 import os
 import re
 import sys
-import time
 import types
 try:
     from cStringIO import StringIO    # Faster, where available
@@ -460,8 +458,6 @@ class S3Request(object):
         self.component_id = None
         self.method = None
 
-        representation = self.extension
-
         # Get the names of all components
         tablename = "%s_%s" % (self.prefix, self.name)
 
@@ -539,7 +535,11 @@ class S3Request(object):
             self.http = "GET"
 
         # Retrieve filters from request body
-        if mode == "ajax" or content_type[:10] != "multipart/":
+        if content_type == "application/x-www-form-urlencoded":
+            # Read POST vars (from S3.gis.refreshLayer)
+            filters = self.post_vars
+            decode = None
+        elif mode == "ajax" or content_type[:10] != "multipart/":
             # Read body JSON (from $.searchS3)
             s = self.body
             s.seek(0)

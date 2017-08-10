@@ -2386,8 +2386,53 @@ class PRGroupModel(S3Model):
                                                      "multiple": False,
                                                      },
 
+                            # Events
+                            event_event = {"link": "event_team",
+                                           "joinby": "group_id",
+                                           "key": "event_id",
+                                           "actuate": "hide",
+                                           "autodelete": False,
+                                           },
+
                             # Incidents
+                            event_incident = (# All Incidents
+                                              {"name": "incident",
+                                               "link": "event_team",
+                                               "joinby": "group_id",
+                                               "key": "incident_id",
+                                               "actuate": "hide",
+                                               "autodelete": False,
+                                               },
+                                              # Active Incidents
+                                              {"name": "active_incident",
+                                               "link": "event_team",
+                                               "joinby": "group_id",
+                                               "key": "incident_id",
+                                               "actuate": "hide",
+                                               "autodelete": False,
+                                               "filterby": {"closed": False,
+                                                            },
+                                               },
+                                              ),
                             event_team = "group_id",
+
+                            # Organisations
+                            org_organisation = {"link": "org_organisation_team",
+                                                "joinby": "group_id",
+                                                "key": "organisation_id",
+                                                "actuate": "hide",
+                                                "autodelete": False,
+                                                },
+                            org_organisation_team = "group_id",
+
+                            # Posts
+                            cms_post = {"link": "cms_post_team",
+                                        "joinby": "group_id",
+                                        "key": "post_id",
+                                        "actuate": "replace",
+                                        "autodelete": False,
+                                        },
+                            cms_post_team = "group_id",
                             )
 
         # ---------------------------------------------------------------------
@@ -4667,6 +4712,7 @@ class PRIdentityModel(S3Model):
                            2:  T("National ID Card"),
                            3:  T("Driving License"),
                            #4: T("Credit Card"),
+                           5:  T("Residence Permit"),
                            99: T("other")
                            }
 
@@ -5888,7 +5934,7 @@ class pr_PersonRepresent(S3Represent):
                     controller = "dvr"
                 else:
                     controller = "pr"
-            linkto = URL(c=controller, f="person", args=["[id]"])
+            linkto = URL(c=controller, f="person", args=["[id]"], extension="")
 
         if not fields:
             fields = ["first_name", "middle_name", "last_name"]
@@ -6275,12 +6321,13 @@ class pr_Contacts(S3Method):
                 "RADIO": 6,
                 "TWITTER": 7,
                 "FACEBOOK": 8,
-                "FAX": 9,
-                "OTHER": 10,
-                "IRC": 11,
-                "GITHUB": 12,
-                "LINKEDIN": 13,
-                "BLOG": 14,
+                "WHATSAPP": 9,
+                "FAX": 10,
+                "OTHER": 11,
+                "IRC": 12,
+                "GITHUB": 13,
+                "LINKEDIN": 14,
+                "BLOG": 15,
                 }
 
     def apply_method(self, r, **attr):

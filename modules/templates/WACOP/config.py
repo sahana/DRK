@@ -15,7 +15,6 @@ def config(settings):
     # =========================================================================
     # System Settings
     #
-    settings.base.system_name = T("Sahana: Washington Common Operating Picture (WA-COP)")
     settings.base.system_name_short = T("Sahana")
 
     # Prepop default
@@ -54,6 +53,21 @@ def config(settings):
     #
     settings.security.policy = 7 # Apply Controller, Function and Table ACLs
     settings.security.map = True
+
+    # -------------------------------------------------------------------------
+    # Audit
+    #
+    def audit_write(method, tablename, form, record, representation):
+        if tablename in ("event_incident",
+                         "pr_group",
+                         ):
+            # Track the Source Repository for Incidents / Resources
+            return True
+        else:
+            # Don't Audit
+            return False
+
+    settings.security.audit_write = audit_write
 
     # -------------------------------------------------------------------------
     # L10n (Localization) settings
@@ -99,7 +113,7 @@ def config(settings):
     # Restrict the Location Selector to just certain countries
     settings.gis.countries = ("US",)
     # Levels for the LocationSelector
-    levels = ("L1", "L2", "L3")
+    #levels = ("L1", "L2", "L3")
 
     # Uncomment to pass Addresses imported from CSV to a Geocoder to try and automate Lat/Lon
     #settings.gis.geocode_imported_addresses = "google"
@@ -116,6 +130,12 @@ def config(settings):
     settings.gis.location_represent_address_only = "icon"
     # Resources which can be directly added to the main map
     settings.gis.poi_create_resources = None
+
+    # -------------------------------------------------------------------------
+    # UI Settings
+    #
+    settings.ui.datatables_pagingType = "bootstrap"
+    settings.ui.update_label = "Edit"
 
     # -------------------------------------------------------------------------
     # Modules
@@ -279,7 +299,14 @@ def config(settings):
             # Custom Form
             from s3 import S3SQLCustomForm, S3SQLInlineComponent
 
-            crud_fields = [(T("Type"), "series_id"),
+            s3db.cms_post_team.group_id.widget = None
+
+            crud_fields = [S3SQLInlineComponent("post_team",
+                                                fields = [("", "group_id")],
+                                                label = T("Resource"),
+                                                multiple = False,
+                                                ),
+                           (T("Type"), "series_id"),
                            (T("Priority"), "priority"),
                            (T("Status"), "status_id"),
                            (T("Title"), "title"),
@@ -303,10 +330,10 @@ def config(settings):
                     query = (itable.event_id == r.id) & \
                             (itable.closed == False) & \
                             (itable.deleted == False)
-                    set = db(query)
+                    the_set = db(query)
                     f = s3db.event_post.incident_id
                     f.requires = IS_EMPTY_OR(
-                                    IS_ONE_OF(set, "event_incident.id",
+                                    IS_ONE_OF(the_set, "event_incident.id",
                                               f.represent,
                                               orderby="event_incident.name",
                                               sort=True))
@@ -365,6 +392,8 @@ def config(settings):
             s3.dl_no_header = True
 
             s3db.configure(tablename,
+                           # No create form in the datalist popups on Resource Browse page
+                           insertable = False,
                            list_fields = ["series_id",
                                           "priority",
                                           "status_id",
@@ -375,7 +404,8 @@ def config(settings):
                                           "tag.name",
                                           "document.file",
                                           "comment.id",
-                                          #"comment.body", # Extra fields come in unsorted, so can't match up to records
+                                          # Extra fields come in unsorted, so can't match up to records
+                                          #"comment.body",
                                           #"comment.created_by",
                                           #"comment.created_on",
                                           ],
@@ -503,6 +533,7 @@ def config(settings):
                                            event_name,
                                            # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
                                            represent = lambda v: v,
+                                           search_field = "name",
                                            )
 
         def event_status(row):
@@ -683,7 +714,7 @@ def config(settings):
 
         # Custom rheader tabs
         attr = dict(attr)
-        attr["rheader"] = wacop_event_rheader
+        attr["rheader"] = wacop_rheader
 
         return attr
 
@@ -713,6 +744,7 @@ def config(settings):
                                            incident_name,
                                            # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
                                            represent = lambda v: v,
+                                           search_field = "name",
                                            )
 
         def incident_status(row):
@@ -753,6 +785,22 @@ def config(settings):
                     return current.messages["NONE"]
             #append(Field.Method("tags", incident_tags))
             itable.tags = s3_fieldmethod("tags", incident_tags)
+
+            atable = db.s3_audit
+            stable = s3db.sync_repository
+            def incident_source(row):
+                query = (atable.record_id == row["event_incident.id"]) & \
+                        (atable.tablename == "event_incident") & \
+                        (atable.repository_id == stable.id)
+                repo = db(query).select(stable.name,
+                                        limitby=(0, 1)
+                                        ).first()
+                if repo:
+                    return repo.name
+                else:
+                    return T("Internal")
+            #append(Field.Method("source", incident_source))
+            itable.source = s3_fieldmethod("source", incident_source)
 
             list_fields = [(T("Name"), "name_click"),
                            (T("Status"), "status"),
@@ -821,6 +869,15 @@ def config(settings):
             if r.method == "assign":
                 current.menu.main = ""
 
+            elif r.component_name == "group":
+                if r.component_id:
+                    f = s3db.event_team.group_id
+                    f.writable = False
+                    f.comment = None
+                s3db.configure("event_team",
+                               update_next = r.url(),
+                               )
+
             elif r.component_name == "task":
                 from s3 import S3SQLCustomForm
                 crud_form = S3SQLCustomForm("name",
@@ -876,6 +933,10 @@ def config(settings):
                                                  "modules", "templates",
                                                  "WACOP", "views",
                                                  "assign.html")
+
+                elif r.component_name == "group":
+                    output["title"] = T("Resource Details")
+
                 #elif r.component_name == "post":
                 #    # Add Tags - no, do client-side
                 #    output["form"].append()
@@ -896,21 +957,37 @@ def config(settings):
                     #                          read_url=custom_url,
                     #                          update_url=custom_url)
 
-               #     # System-wide Alert
-               #     from templates.WACOP.controllers import custom_WACOP
-               #     custom = custom_WACOP()
-               #     output["system_wide"] = custom._system_wide_html()
-
             return output
         s3.postp = custom_postp
 
         # Custom rheader tabs
         #attr = dict(attr)
-        #attr["rheader"] = wacop_event_rheader
-        attr["rheader"] = None
+        attr["rheader"] = wacop_rheader
 
         # No sidebar menu
         current.menu.options = None
+
+        refresh = current.request.get_vars.get("refresh")
+        if refresh:
+            # Popup from Resource Browse
+            current.menu.main = ""
+
+            attr["rheader"] = wacop_rheader
+
+            #from gluon import A, URL
+            #attr["custom_crud_buttons"] = {"list_btn": A(T("Browse Resources"),
+            #                                             _class="action-btn",
+            #                                             _href=URL(c="pr", f="group", args="browse"),
+            #                                             _id="list-btn",
+            #                                             )
+            #                               }
+            attr["custom_crud_buttons"] = {"list_btn": "",
+                                           }
+
+            response = current.response
+            if response.confirmation:
+                script = '''self.parent.$('#%s').dataTable().fnReloadAjax()''' % refresh
+                response.s3.jquery_ready.append(script)
 
         return attr
 
@@ -942,6 +1019,7 @@ def config(settings):
                                              # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
                                              # @ToDo: Bulk lookups
                                              represent = lambda v: v,
+                                             search_field = "human_resource_id",
                                              )
 
         s3db.configure(tablename,
@@ -987,6 +1065,7 @@ def config(settings):
                                             # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
                                             # @ToDo: Bulk lookups
                                             represent = lambda v: v,
+                                            search_field = "organisation_id",
                                             )
 
         s3db.configure(tablename,
@@ -1011,7 +1090,7 @@ def config(settings):
         s3db = current.s3db
         ertable = s3db.event_team
 
-        #sertable.group_id.label = T("Resource")
+        #ertable.group_id.label = T("Resource")
 
         # Form
         # @ToDo: Have both Team & Event_Team in 1 form
@@ -1021,32 +1100,72 @@ def config(settings):
                                     )
 
         # Virtual Fields
-        # Always used from either the Event or Incident context
-        f = r.function
-        record_id = r.id
+        # @ToDo: Replace with a link to Popup a dataTable of the List of Updates
+        incident_id = r.get_vars.get("~.incident_id")
+        if incident_id:
+            f = "incident"
+            record_id = incident_id
+        else:
+            event_id = r.get_vars.get("~.event_id")
+            if event_id:
+                f = "event"
+                record_id = event_id
+            else:
+                f = r.function
+                record_id = r.id
         group_represent = ertable.group_id.represent
-        def team_name(row):
-            group_id = row["event_team.group_id"]
-            return A(group_represent(group_id),
-                     _href = URL(c="event", f=f,
-                                 args=[record_id, "group", group_id, "profile"],
-                                 extension = "", # ensure no .aadata
-                                 ),
-                     )
+        if f in ("group", "team"):
+            # Resource Browse (inc aadata)
+            def team_name(row):
+                group_id = row["event_team.group_id"]
+                return A(group_represent(group_id),
+                         _href = URL(c="event", f="incident",
+                                     args = [row["event_team.incident_id"], "group", group_id, "read"],
+                                     vars = {"refresh": "custom-list-event_team",
+                                             },
+                                     extension = "", # ensure no .aadata
+                                     ),
+                         _class = "s3_modal",
+                         )
+        else:
+            # Event Profile or Incident Profile
+            def team_name(row):
+                group_id = row["event_team.group_id"]
+                return A(group_represent(group_id),
+                         _href = URL(c="event", f=f,
+                                     args = [record_id, "group", group_id, "read"],
+                                     vars = {"refresh": "custom-list-event_team",
+                                             },
+                                     extension = "", # ensure no .aadata
+                                     ),
+                         _class = "s3_modal",
+                         )
         ertable.name_click = s3_fieldmethod("name_click",
                                             team_name,
                                             # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
                                             # @ToDo: Bulk lookups
                                             represent = lambda v: v,
+                                            search_field = "group_id",
                                             )
+
+        if f in ("group", "team"):
+            # Resource Browse (inc aadata)
+            list_fields = [(T("Group"), "name_click"),
+                           "incident_id",
+                           "status_id",
+                           ]
+        else:
+            # Event Profile or Incident Profile
+            list_fields = [(T("Name"), "name_click"),
+                           "incident_id",
+                           "status_id",
+                           ]
 
         s3db.configure(tablename,
                        crud_form = crud_form,
                        extra_fields = ("group_id",
                                        ),
-                       list_fields = [(T("Name"), "name_click"),
-                                      "status_id",
-                                      ],
+                       list_fields = list_fields,
                        orderby = "pr_group.name",
                        )
 
@@ -1055,7 +1174,12 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_pr_group_resource(r, tablename):
 
+        from gluon import A, URL
+        from s3 import s3_fieldmethod, S3SQLCustomForm, S3SQLInlineComponent
+
+        db = current.db
         s3db = current.s3db
+        table = s3db.pr_group
 
         current.response.s3.crud_strings[tablename] = Storage(
             label_create = T("Create Resource"),
@@ -1069,26 +1193,117 @@ def config(settings):
             msg_record_deleted = T("Resource deleted"),
             msg_list_empty = T("No Resources currently registered"))
 
-        field = s3db.pr_group.status_id
+        field = table.status_id
         field.readable = field.writable = True
 
-        from s3 import S3SQLCustomForm
         crud_form = S3SQLCustomForm((T("Name"), "name"),
                                     "status_id",
+                                    S3SQLInlineComponent("organisation_team",
+                                                         fields = [("", "organisation_id")],
+                                                         label = T("Organization"),
+                                                         multiple = False,
+                                                         ),
                                     "comments",
                                     )
 
-        list_fields = [(T("Name"), "name"),
+        # Virtual Fields
+        def team_name(row):
+            return A(row["pr_group.name"],
+                     _href = URL(c="pr", f="group",
+                                 args = [row["pr_group.id"], "read"],
+                                 vars = {"refresh": "custom-list-pr_group",
+                                         },
+                                 extension = "", # ensure no .aadata
+                                 ),
+                     _class = "s3_modal",
+                     )
+        table.name_click = s3_fieldmethod("name_click",
+                                          team_name,
+                                          # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
+                                          # @ToDo: Bulk lookups
+                                          represent = lambda v: v,
+                                          search_field = "name",
+                                          )
+
+        utable = s3db.cms_post_team
+        gfield = utable.group_id
+        query = (utable.deleted == False)
+        def updates(row):
+            group_id = row["pr_group.id"]
+            count = db(query & (gfield == group_id)).count()
+            if count:
+                return A(count,
+                         _href = URL(c="cms", f="post",
+                                     args = ["datalist.popup"],
+                                     vars = {"post_team.group_id": group_id},
+                                     ),
+                         _class="s3_modal",
+                         )
+            else:
+                return 0
+        table.updates = s3_fieldmethod("updates",
+                                       updates,
+                                       # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
+                                       # @ToDo: Bulk lookups
+                                       represent = lambda v: v,
+                                       #search_field = "name",
+                                       )
+
+        list_fields = [(T("Name"), "name_click"),
                        "status_id",
-                       "comments",
+                       (T("Current Incident"), "active_incident__link.incident_id"),
+                       (T("Organization"), "organisation_team.organisation_id"),
+                       # Replaced with VF
+                       #(T("Updates"), "post_team.post_id"),
+                       (T("Updates"), "updates"),
                        ]
 
         s3db.configure(tablename,
                        crud_form = crud_form,
+                       extra_fields = ("name",
+                                       ),
                        list_fields = list_fields,
                        )
 
     settings.customise_pr_group_resource = customise_pr_group_resource
+
+    # -------------------------------------------------------------------------
+    def customise_pr_group_controller(**attr):
+
+        # Custom Browse
+        from templates.WACOP.controllers import resource_Browse
+        current.s3db.set_method("pr", "group",
+                                method = "browse",
+                                action = resource_Browse)
+
+        # No sidebar menu
+        current.menu.options = None
+
+        refresh = current.request.get_vars.get("refresh")
+        if refresh:
+            # Popup from Browse
+            current.menu.main = ""
+
+            attr["rheader"] = wacop_rheader
+
+            #from gluon import A, URL
+            #attr["custom_crud_buttons"] = {"list_btn": A(T("Browse Resources"),
+            #                                             _class="action-btn",
+            #                                             _href=URL(args="browse"),
+            #                                             _id="list-btn",
+            #                                             )
+            #                               }
+            attr["custom_crud_buttons"] = {"list_btn": "",
+                                           }
+
+            response = current.response
+            if response.confirmation:
+                script = '''self.parent.$('#%s').dataTable().fnReloadAjax()''' % refresh
+                response.s3.jquery_ready.append(script)
+
+        return attr
+
+    settings.customise_pr_group_controller = customise_pr_group_controller
 
     # -------------------------------------------------------------------------
     def customise_pr_person_controller(**attr):
@@ -1128,6 +1343,7 @@ def config(settings):
                                                       task_name,
                                                       # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
                                                       represent = lambda v: v,
+                                                      search_field = "name",
                                                       )
 
         s3db.configure(tablename,
@@ -1145,8 +1361,126 @@ def config(settings):
     settings.customise_project_task_resource = customise_project_task_resource
 
 # =============================================================================
-def wacop_event_rheader(r, tabs=[]):
-    """ EVENT custom resource headers """
+def event_team_rheader(incident_id, group_id, updates=False):
+    """
+        RHeader for event_team
+    """
+
+    from gluon import A, DIV, SPAN, TABLE, TR, TH, URL
+
+    T = current.T
+
+    table = current.s3db.event_team
+    query = (table.incident_id == incident_id) & \
+            (table.group_id == group_id)
+    record = current.db(query).select(table.status_id,
+                                      limitby=(0, 1),
+                                      ).first()
+
+    rheader_tabs = DIV(SPAN(A(T("Resource Details"),
+                              _href=URL(c="event", f="incident",
+                                        args = [incident_id, "group", group_id],
+                                        vars = {"refresh": "custom-list-event_team",
+                                                },
+                                        ),
+                              _id="rheader_tab_group",
+                              ),
+                            _class="tab_here" if not updates else "tab_other",
+                            ),
+                       SPAN(A(T("Updates"),
+                              _href=URL(c="pr", f="group",
+                                        args = [group_id, "post", "datalist"],
+                                        vars = {"incident_id": incident_id,
+                                                "refresh": "custom-list-event_team",
+                                                }
+                                        ),
+                              _id="rheader_tab_post",
+                              ),
+                            _class="tab_here" if updates else "tab_last",
+                            ),
+                       _class="tabs",
+                       )
+    rheader = DIV(TABLE(TR(TH("%s: " % table.group_id.label),
+                           table.group_id.represent(group_id),
+                           ),
+                        TR(TH("%s: " % table.incident_id.label),
+                           table.incident_id.represent(incident_id),
+                           ),
+                        TR(TH("%s: " % table.status_id.label),
+                           table.status_id.represent(record.status_id),
+                           ),
+                        ),
+                  rheader_tabs)
+    return rheader
+    
+# =============================================================================
+def pr_group_rheader(r):
+    """
+        RHeader for pr_group
+    """
+
+    from gluon import A, DIV, SPAN, TABLE, TR, TH, URL
+
+    T = current.T
+    s3db = current.s3db
+    group_id = r.id
+    record = r.record
+    table = s3db.pr_group
+
+    updates = r.component
+
+    ltable = s3db.org_organisation_team
+    query = (ltable.group_id == group_id) & \
+            (ltable.deleted == False)
+    org = current.db(query).select(ltable.organisation_id,
+                                   limitby=(0, 1)
+                                   ).first()
+    if org:
+        org = TR(TH("%s: " % ltable.organisation_id.label),
+                 ltable.organisation_id.represent(org.organisation_id),
+                 )
+    else:
+        org = ""
+
+    rheader_tabs = DIV(SPAN(A(T("Resource Details"),
+                              _href=URL(c="pr", f="group",
+                                        args = [group_id],
+                                        vars = {"refresh": "custom-list-pr_group",
+                                                },
+                                        ),
+                              _id="rheader_tab_group",
+                              ),
+                            _class="tab_here" if not updates else "tab_other",
+                            ),
+                       SPAN(A(T("Updates"),
+                              _href=URL(c="pr", f="group",
+                                        args = [group_id, "post", "datalist"],
+                                        vars = {"refresh": "custom-list-pr_group",
+                                                },
+                                        ),
+                              _id="rheader_tab_post",
+                              ),
+                            _class="tab_here" if updates else "tab_last",
+                            ),
+                       _class="tabs",
+                       )
+    rheader = DIV(TABLE(TR(TH("%s: " % table.name.label),
+                           record.name,
+                           ),
+                        TR(TH("%s: " % table.status_id.label),
+                           table.status_id.represent(record.status_id),
+                           ),
+                        org,
+                        TR(TH("%s: " % table.comments.label),
+                           record.comments or current.messages["NONE"],
+                           ),
+                        ),
+                  rheader_tabs)
+    return rheader
+
+# =============================================================================
+def wacop_rheader(r, tabs=[]):
+    """ WACOP custom resource headers """
 
     if r.representation != "html":
         # Resource headers only used in interactive views
@@ -1166,7 +1500,43 @@ def wacop_event_rheader(r, tabs=[]):
     if record:
         T = current.T
 
-        if tablename == "event_event":
+        if tablename == "pr_group":
+
+            incident_id = r.get_vars.get("incident_id")
+            if incident_id and r.component_name == "post":
+                # Look like event_team details
+                group_id = r.id
+                rheader = event_team_rheader(incident_id, group_id, updates=True)
+                return rheader
+            else:
+                # Normal
+                rheader = pr_group_rheader(r)
+                return rheader
+
+        elif tablename == "event_incident":
+            if r.component_name == "group":
+                incident_id = r.id
+                group_id = r.component_id
+                rheader = event_team_rheader(incident_id, group_id, updates=False)
+                return rheader
+            else:
+                # Unused
+                return None
+
+                if not tabs:
+                    tabs = [(T("Incident Details"), None),
+                            (T("Units"), "group"),
+                            (T("Tasks"), "task"),
+                            (T("Updates"), "post"),
+                            ]
+
+                rheader_fields = [["name"],
+                                  ["date"],
+                                  ["comments"],
+                                  ]
+
+        elif tablename == "event_event":
+            # No normal workflows use this
 
             if not tabs:
                 tabs = [(T("Event Details"), None),
@@ -1178,20 +1548,6 @@ def wacop_event_rheader(r, tabs=[]):
 
             rheader_fields = [["name"],
                               ["start_date"],
-                              ["comments"],
-                              ]
-
-        elif tablename == "event_incident":
-
-            if not tabs:
-                tabs = [(T("Incident Details"), None),
-                        (T("Units"), "group"),
-                        (T("Tasks"), "task"),
-                        (T("Updates"), "post"),
-                        ]
-
-            rheader_fields = [["name"],
-                              ["date"],
                               ["comments"],
                               ]
 

@@ -361,6 +361,7 @@ def config(settings):
                         from s3 import S3SQLCustomForm, \
                                        S3SQLInlineComponent, \
                                        S3SQLInlineLink, \
+                                       S3SQLVerticalSubFormLayout, \
                                        S3TextFilter, \
                                        S3DateFilter, \
                                        S3OptionsFilter, \
@@ -396,6 +397,13 @@ def config(settings):
                         del options[9] # Remove "other"
                         field.requires = IS_IN_SET(options, zero=None)
 
+                        # Remove Add-links in residence status
+                        rtable = s3db.dvr_residence_status
+                        field = rtable.status_type_id
+                        field.comment = None
+                        field = rtable.permit_type_id
+                        field.comment = None
+
                         # Make gender mandatory, remove "unknown"
                         field = table.gender
                         field.default = None
@@ -415,6 +423,7 @@ def config(settings):
                         crud_form = S3SQLCustomForm(
 
                             # Case Details ----------------------------
+                            "dvr_case.date",
                             "dvr_case.organisation_id",
                             "dvr_case.human_resource_id",
                             (T("Case Status"), "dvr_case.status_id"),
@@ -447,7 +456,7 @@ def config(settings):
                                     link = False,
                                     multiple = False,
                                     ),
-                            (T("Date of Arrival"), "dvr_case.date"),
+                            (T("Date of Entry"), "dvr_case_details.arrival_date"),
                             S3SQLInlineComponent(
                                     "bamf",
                                     fields = [("", "value"),
@@ -459,8 +468,22 @@ def config(settings):
                                     multiple = False,
                                     name = "bamf",
                                     ),
-                            "dvr_case.valid_until",
-                            "dvr_case.stay_permit_until",
+                            #"dvr_case.valid_until",
+                            S3SQLInlineComponent(
+                                    "residence_status",
+                                    fields = ["status_type_id",
+                                              "permit_type_id",
+                                              #"reference",
+                                              #"valid_from",
+                                              "valid_until",
+                                              "comments",
+                                              ],
+                                    label = T("Residence Status"),
+                                    #multiple = False,
+                                    layout = S3SQLVerticalSubFormLayout,
+                                    explicit_add = T("Add Residence Status"),
+                                    ),
+                            #"dvr_case.stay_permit_until",
 
                             # Other Details ---------------------------
                             "person_details.occupation",

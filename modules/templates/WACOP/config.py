@@ -254,20 +254,30 @@ def config(settings):
     def cms_post_onaccept(form):
         """
             Handle Tags in Create / Update forms
+            Auto-Bookmark Updates created from the Dashboard
         """
 
         post_id = form.vars.id
 
         db = current.db
         s3db = current.s3db
+        request = current.request
+
+        if request.get_vars.get("dashboard"):
+            # Bookmark the post
+            s3db.cms_post_user.insert(post_id = post_id,
+                                      user_id = current.auth.user.id,
+                                      )
+
+        # Process Tags
         ttable = s3db.cms_tag
         ltable = s3db.cms_tag_post
 
         # Delete all existing tags for this post
         db(ltable.post_id == post_id).delete()
 
-        # Add these tags
-        tags = current.request.post_vars.get("tags")
+        # Add tags found in form
+        tags = request.post_vars.get("tags")
         if not tags:
             return
 
@@ -371,7 +381,7 @@ def config(settings):
                 tags = ",".join(tags)
                 s3.jquery_ready.append('''wacop_update_tags("%s")''' % tags)
 
-            # Processing Tags
+            # Processing Tags/auto-Bookmarks
             default = s3db.get_config(tablename, "onaccept")
             if isinstance(default, list):
                 onaccept = default
@@ -384,7 +394,7 @@ def config(settings):
                            onaccept = onaccept,
                            )
 
-        elif method in ("custom", "datalist", "filter"):
+        elif method in ("custom", "dashboard", "datalist", "filter"):
             # dataList configuration
             from templates.WACOP.controllers import cms_post_list_layout
 
@@ -414,7 +424,12 @@ def config(settings):
                            #orderby = "cms_post.date desc",
                            )
 
-            if method in ("custom", "filter"):
+            get_vars = r.get_vars
+            if method == "datalist" and get_vars.get("dashboard"):
+                from templates.WACOP.controllers import dashboard_filter
+                s3.filter = dashboard_filter()
+
+            elif method in ("custom", "dashboard", "filter"):
                 # Filter Widgets
                 from s3 import S3DateFilter, \
                                S3LocationFilter, \
@@ -423,11 +438,14 @@ def config(settings):
 
                 if method == "filter":
                     # Apply filter_vars
-                    get_vars = r.get_vars
                     for k, v in get_vars.iteritems():
                         # We only expect a maximum of 1 of these, no need to append
-                        from s3 import FS
-                        s3.filter = (FS(k) == v)
+                        if k == "dashboard":
+                            from templates.WACOP.controllers import dashboard_filter
+                            s3.filter = dashboard_filter()
+                        else:
+                            from s3 import FS
+                            s3.filter = (FS(k) == v)
 
                 date_filter = S3DateFilter("date",
                                            # If we introduce an end_date on Posts:
@@ -474,6 +492,7 @@ def config(settings):
                                                   ),
                                   date_filter,
                                   ]
+
                 if r.tablename == "event_event" or \
                    (method == "filter" and get_vars.get("event_post.event_id")):
                     # Event Profile
@@ -483,17 +502,18 @@ def config(settings):
                                                              no_opts = "",
                                                              ))
 
-                user = current.auth.user
-                if user:
-                    filter_widgets.insert(1, S3OptionsFilter("bookmark.user_id",
-                                                             label = "",
-                                                             options = {"*": T("All"),
-                                                                        user.id: T("My Bookmarks"),
-                                                                        },
-                                                             cols = 2,
-                                                             multiple = False,
-                                                             table = False,
-                                                             ))
+                if method != "dashboard":
+                    user = current.auth.user
+                    if user:
+                        filter_widgets.insert(1, S3OptionsFilter("bookmark.user_id",
+                                                                 label = "",
+                                                                 options = {"*": T("All"),
+                                                                            user.id: T("My Bookmarks"),
+                                                                            },
+                                                                 cols = 2,
+                                                                 multiple = False,
+                                                                 table = False,
+                                                                 ))
 
                 s3db.configure(tablename,
                                filter_widgets = filter_widgets,
@@ -676,6 +696,14 @@ def config(settings):
                     "date_due",
                     "status",
                     "comments",
+                    S3SQLInlineComponent("document",
+                                         name = "file",
+                                         label = T("Files"),
+                                         fields = [("", "file"),
+                                                   #"comments",
+                                                   ],
+                                         ),
+                                    
                     )
                 r.component.configure(crud_form = crud_form,
                                       )
@@ -877,20 +905,6 @@ def config(settings):
                 s3db.configure("event_team",
                                update_next = r.url(),
                                )
-
-            elif r.component_name == "task":
-                from s3 import S3SQLCustomForm
-                crud_form = S3SQLCustomForm("name",
-                                            "description",
-                                            "source",
-                                            "priority",
-                                            "pe_id",
-                                            "date_due",
-                                            "status",
-                                            "comments",
-                                            )
-                r.component.configure(crud_form = crud_form,
-                                      )
 
             elif r.representation == "popup":
                 if not r.component:
@@ -1322,12 +1336,41 @@ def config(settings):
     settings.customise_pr_person_controller = customise_pr_person_controller
 
     # -------------------------------------------------------------------------
+    def user_pe_id_default_filter(selector, tablename=None):
+        """
+            Default filter for pe_id:
+            * Use the user's pe_id if logged-in
+        """
+
+        auth = current.auth
+        if auth.is_logged_in():
+            return auth.user.pe_id
+        else:
+            # no default
+            return {}
+
+    # -------------------------------------------------------------------------
     def customise_project_task_resource(r, tablename):
 
-        from gluon import A, URL
-        from s3 import s3_fieldmethod
+        from gluon import A, URL, IS_EMPTY_OR
+        from s3 import s3_fieldmethod, IS_ONE_OF, S3DateFilter, S3OptionsFilter, S3TextFilter, S3SQLCustomForm, S3SQLInlineComponent
+
+        method = r.method
+        if method == "dashboard":
+            # Default Filter to 'Tasks Assigned to me'
+            from s3 import s3_set_default_filter
+            s3_set_default_filter("~.pe_id",
+                                  user_pe_id_default_filter,
+                                  tablename = tablename)
+        elif method == "filter":
+            # Apply filter_vars
+            for k, v in r.get_vars.iteritems():
+                # We only expect a maximum of 1 of these, no need to append
+                from s3 import FS
+                current.response.s3.filter = (FS(k) == v)
 
         s3db = current.s3db
+        table = s3db.project_task
 
         # Virtual Fields
         # Always used from either the Event or Incident context
@@ -1339,17 +1382,86 @@ def config(settings):
                                  args=[record_id, "task", row["project_task.id"], "profile"],
                                  ),
                      )
-        s3db.project_task.name_click = s3_fieldmethod("name_click",
-                                                      task_name,
-                                                      # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
-                                                      represent = lambda v: v,
-                                                      search_field = "name",
-                                                      )
+        table.name_click = s3_fieldmethod("name_click",
+                                          task_name,
+                                          # over-ride the default represent of s3_unicode to prevent HTML being rendered too early
+                                          represent = lambda v: v,
+                                          search_field = "name",
+                                          )
+
+        # Assignee must be a System User
+        etable = s3db.pr_pentity
+        ltable = s3db.pr_person_user
+        query = (ltable.pe_id == etable.pe_id)
+        set = current.db(query)
+        f = table.pe_id
+        f.requires = IS_EMPTY_OR(
+                        IS_ONE_OF(set, "pr_pentity.pe_id",
+                                  f.represent))
+
+        # Custom Form
+        crud_form = S3SQLCustomForm("name",
+                                    "description",
+                                    "source",
+                                    "priority",
+                                    "pe_id",
+                                    "date_due",
+                                    "status",
+                                    "comments",
+                                    S3SQLInlineComponent("document",
+                                                         name = "file",
+                                                         label = T("Files"),
+                                                         fields = [("", "file"),
+                                                                   #"comments",
+                                                                   ],
+                                                         ),
+                                    )
+                                    
+        # Filters
+        project_task_priority_opts = settings.get_project_task_priority_opts()
+        project_task_status_opts = settings.get_project_task_status_opts()
+
+        filter_widgets = [S3TextFilter(["name",
+                                        "description",
+                                        ],
+                                       label = T("Search"),
+                                       _class = "filter-search",
+                                       ),
+                          S3OptionsFilter("priority",
+                                          options = project_task_priority_opts,
+                                          ),
+                          S3OptionsFilter("pe_id",
+                                          label = T("Assigned To"),
+                                          none = T("Unassigned"),
+                                          ),
+                          S3OptionsFilter("status",
+                                          options = project_task_status_opts,
+                                          ),
+                          S3OptionsFilter("created_by",
+                                          label = T("Created By"),
+                                          hidden = True,
+                                          ),
+                          S3DateFilter("created_on",
+                                       label = T("Date Created"),
+                                       hide_time = True,
+                                       hidden = True,
+                                       ),
+                          S3DateFilter("date_due",
+                                       hide_time = True,
+                                       hidden = True,
+                                       ),
+                          S3DateFilter("modified_on",
+                                       label = T("Date Modified"),
+                                       hide_time = True,
+                                       hidden = True,
+                                       ),
+                          ]
 
         s3db.configure(tablename,
-                       #crud_form = crud_form,
+                       crud_form = crud_form,
                        extra_fields = ("name",
                                        ),
+                       filter_widgets = filter_widgets,
                        list_fields = ["status",
                                       (T("Description"), "name_click"),
                                       (T("Created"), "created_on"),

@@ -299,7 +299,7 @@ def config(settings):
     #settings.gis.permalink = False
     # Resources which can be directly added to the main map
     #settings.gis.poi_create_resources = None
-    #settings.gis.poi_create_resources = [{"c":"event", "f":"incident_report", "table": "gis_poi", label": T("Add Incident Report") ,"tooltip": T("Add Incident Report"), "layer":"Incident Reports", "location": "popup"}]
+    #settings.gis.poi_create_resources = [{"c":"event", "f":"incident_report", "table": "gis_poi", "label": T("Add Incident Report") ,"tooltip": T("Add Incident Report"), "layer":"Incident Reports", "location": "popup"}]
     # PoIs to export in KML/OSM feeds from Admin locations
     #settings.gis.poi_export_resources = ["cr_shelter", "hms_hospital", "org_office"]
     # Uncomment to show the Print control:
@@ -328,6 +328,8 @@ def config(settings):
     #settings.gis.zoomcontrol = False
     # Uncomment to open Location represent links in a Popup Window
     #settings.gis.popup_location_link = True
+    # Uncomment to include WKT in XML exports
+    #settings.gis.xml_wkt = True
     # GeoNames username
     settings.gis.geonames_username = "eden_test"
 

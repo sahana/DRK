@@ -36,8 +36,11 @@ class S3MainMenu(default.S3MainMenu):
     def menu_modules(cls):
         """ Custom Modules Menu """
 
+        auth = current.auth
+
         case_vars = {"closed": "0"}
-        if current.auth.s3_logged_in_human_resource():
+        if auth.s3_logged_in_human_resource() and \
+           auth.s3_has_role("CASE_MANAGEMENT"):
             case_vars["mine"] = "1"
 
         return [
@@ -46,6 +49,7 @@ class S3MainMenu(default.S3MainMenu):
                check = lambda this: not this.preceding()[-1].check_permission(),
                ),
             MM("ToDo", c="project", f="task"),
+            #MM("Map", c="gis", f="index"),
             MM("Shelters", c="cr", f="shelter"),
             MM("More", link=False)(
                 MM("Organizations", c="org", f="organisation"),
@@ -171,7 +175,9 @@ class S3OptionsMenu(default.S3OptionsMenu):
     def dvr():
         """ DVR / Disaster Victim Registry """
 
-        sysroles = current.auth.get_system_roles()
+        auth = current.auth
+
+        sysroles = auth.get_system_roles()
 
         ADMIN = sysroles.ADMIN
         ORG_ADMIN = sysroles.ORG_ADMIN
@@ -179,8 +185,8 @@ class S3OptionsMenu(default.S3OptionsMenu):
 
         due_followups = current.s3db.dvr_due_followups
 
-        human_resource_id = current.auth.s3_logged_in_human_resource()
-        if human_resource_id:
+        human_resource_id = auth.s3_logged_in_human_resource()
+        if human_resource_id and auth.s3_has_role("CASE_MANAGEMENT"):
 
             due_followups = due_followups(human_resource_id = human_resource_id) or "0"
             follow_ups_label = "%s (%s)" % (current.T("Due Follow-ups"),
@@ -190,6 +196,10 @@ class S3OptionsMenu(default.S3OptionsMenu):
             my_cases = M("My Cases", c=("dvr", "pr"), f="person",
                          vars = {"closed": "0", "mine": "1"})(
                             M("Create Case", m="create", t="pr_person", p="create"),
+                            # FIXME crashing (incorrect join order in S3GIS):
+                            #M("Map", f="person", m="map",
+                            #  vars = {"closed": "0", "mine": "1"},
+                            #  ),
                             M("Activities", f="case_activity",
                               vars = {"mine": "1"},
                               ),
@@ -227,6 +237,8 @@ class S3OptionsMenu(default.S3OptionsMenu):
             all_cases = M("Current Cases", c=("dvr", "pr"), f="person",
                           vars = {"closed": "0"})(
                             M("Create Case", m="create", t="pr_person", p="create"),
+                            # FIXME crashing (incorrect join order in S3GIS):
+                            #M("Map", f="person", m="map", vars = {"closed": "0"}),
                             M("All Cases", vars = {}),
                             M("Actions", f="response_action"),
                             )
@@ -261,6 +273,8 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("Need Types", f="need"),
                         M("Intervention Types", f="response_type", m="hierarchy"),
                         M("Appointment Types", f="case_appointment_type"),
+                        M("Residence Status Types", f="residence_status_type"),
+                        M("Residence Permit Types", f="residence_permit_type"),
                         ),
                     )
 
@@ -277,7 +291,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
         return M(c="org")(
                     M("Organizations", f="organisation")(
                         M("Hierarchy", m="hierarchy"),
-                        M("Create", m="create"),
+                        M("Create", m="create", restrict=(ADMIN, ORG_GROUP_ADMIN)),
                         ),
                     M("Facilities", f="facility")(
                         M("Create", m="create"),
@@ -338,7 +352,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
     def project():
         """ PROJECT / Project/Task Management """
 
-        return M(c="project")(
+        return M(c="project", f="task")(
                     M("Tasks", f="task")(
                         M("Create", m="create"),
                         M("My Open Tasks", vars={"mine":1}),

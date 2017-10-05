@@ -49,6 +49,7 @@ __all__ = ("S3ProjectModel",
            "S3ProjectProgrammeProjectModel",
            "S3ProjectSectorModel",
            "S3ProjectStatusModel",
+           "S3ProjectStrategyModel",
            "S3ProjectThemeModel",
            "S3ProjectDRRModel",
            "S3ProjectDRRPPModel",
@@ -5588,7 +5589,7 @@ class S3ProjectPlanningModel(S3Model):
                 project["overall_status"] += overall_status
                 project["total_current_weighting"] += current_weighting
                 project["total_overall_weighting"] += overall_weighting
-                               
+
         # Update Project Status
         total_current_weighting = project["total_current_weighting"]
         if total_current_weighting:
@@ -6554,7 +6555,7 @@ class project_SummaryReport(S3Method):
             record = r.record
             end_date = current.request.utcnow
             end_date = end_date.date()
-            
+
             project = {"start_date": None, #record.start_date,
                        "end_date": end_date,
                        }
@@ -6875,7 +6876,7 @@ class project_SummaryReport(S3Method):
                                     table.planned_progress,
                                     table.weighting,
                                     )
-            
+
             for row in rows:
                 activity_id = row[ltable.activity_id]
                 activity_name = row[atable.name]
@@ -7266,9 +7267,7 @@ class project_SummaryReport(S3Method):
                 project["planned_progress"] += planned_progress
 
             return project, goals
-        
-        
-        
+
         # Filtered, so we need to recalculate dynamically
         # status_by_indicators
         # Goals
@@ -9608,6 +9607,74 @@ class S3ProjectStatusModel(S3Model):
                     )
 
 # =============================================================================
+class S3ProjectStrategyModel(S3Model):
+    """
+        Project Strategy Model
+        - currently just used by IFRC to hold AoF/SFI (& then only for (Training) Events for Bangkok CCST)
+            Area of Focus
+            Strategy for Implementation
+        - Oxfam had a similar approach with SCOs (Strategic Change Objectives)
+    """
+
+    names = ("project_strategy",
+             "project_strategy_id",
+             )
+
+    def model(self):
+
+        T = current.T
+
+        # ---------------------------------------------------------------------
+        # Project Strategies
+        #
+        tablename = "project_strategy"
+        self.define_table(tablename,
+                          Field("name", length=128, notnull=True, unique=True,
+                                label = T("Name"),
+                                requires = [IS_NOT_EMPTY(),
+                                            IS_LENGTH(128),
+                                            ],
+                                ),
+                          s3_comments(),
+                          *s3_meta_fields())
+
+        # CRUD Strings
+        ADD_STRATEGY = T("Create Strategy")
+        current.response.s3.crud_strings[tablename] = Storage(
+            label_create = ADD_STRATEGY,
+            title_display = T("Strategy Details"),
+            title_list = T("Strategies"),
+            title_update = T("Edit Strategy"),
+            #title_upload = T("Import Strategies"),
+            label_list_button = T("List Strategies"),
+            label_delete_button = T("Delete Strategy"),
+            msg_record_created = T("Strategy added"),
+            msg_record_modified = T("Strategy updated"),
+            msg_record_deleted = T("Strategy deleted"),
+            msg_list_empty = T("No Strategies currently registered"))
+
+        # Reusable Field
+        represent = S3Represent(lookup=tablename)
+        strategy_id = S3ReusableField("strategy_id", "reference %s" % tablename,
+                        comment = S3PopupLink(title = ADD_STRATEGY,
+                                              c = "project",
+                                              f = "strategy",
+                                              ),
+                        label = T("Strategy"),
+                        ondelete = "SET NULL",
+                        represent = represent,
+                        requires = IS_EMPTY_OR(
+                                    IS_ONE_OF(current.db, "project_strategy.id",
+                                              represent,
+                                              sort=True)),
+                        sortby = "name",
+                        )
+
+        # Pass names back to global scope (s3.*)
+        return dict(project_strategy_id = strategy_id,
+                    )
+
+# =============================================================================
 class S3ProjectThemeModel(S3Model):
     """
         Project Theme Model
@@ -10182,7 +10249,7 @@ class S3ProjectTaskModel(S3Model):
     """
         Project Task Model
 
-        This class holds the tables used for an Organisation to manage
+        This class holds the tables used for a Person or Organisation to manage
         their Tasks in detail.
     """
 
@@ -12399,7 +12466,8 @@ def project_rheader(r):
         tabs = [(T("Details"), None)]
         append = tabs.append
         append((attachments_label, "document"))
-        if settings.has_module("msg"):
+        if settings.has_module("msg") and \
+           current.auth.permission.has_permission("update", c="msg"):
             append((T("Notify"), "dispatch"))
         #(T("Roles"), "job_title"),
         #(T("Assignments"), "human_resource"),

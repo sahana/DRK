@@ -166,6 +166,9 @@ class S3Config(Storage):
         self.transport = Storage()
         self.xforms = Storage()
 
+        # Lazy property
+        self._db_params = None
+
         self._debug = None
         self._lazy_unwrapped = []
 
@@ -180,6 +183,48 @@ class S3Config(Storage):
                         "org": Storage(name_nice = "Organizations",
                                        ),          # Organization Registry
                         }
+
+    # -------------------------------------------------------------------------
+    @property
+    def db_params(self):
+        """
+            Current database parameters, with defaults applied (lazy property)
+
+            returns: a dict with database parameters:
+                     {type, host, port, database, username, password}
+        """
+
+        parameters = self._db_params
+
+        if parameters is None:
+
+            db_type = self.get_database_type()
+
+            get_param = self.database.get
+            pool_size = get_param("pool_size", 30)
+
+            if db_type == "sqlite":
+                parameters = {}
+            else:
+                if db_type == "postgres":
+                    default_port = "5432"
+                elif db_type == "mysql":
+                    default_port = "3306"
+                else:
+                    default_port = None
+
+                parameters = {"host": get_param("host", "localhost"),
+                              "port": get_param("port", default_port),
+                              "database": get_param("database", "sahana"),
+                              "username": get_param("username", "sahana"),
+                              "password": get_param("password", "password"),
+                              }
+
+            parameters["type"] = db_type
+
+            self._db_params = parameters
+
+        return parameters
 
     # -------------------------------------------------------------------------
     # Debug
@@ -861,8 +906,8 @@ class S3Config(Storage):
         # @ToDo: Set this as the default when running MySQL/PostgreSQL after more testing
         result = self.base.get("session_db", False)
         if result:
-            (db_string, pool_size) = self.get_database_string()
-            if db_string.find("sqlite") != -1:
+            db_type = self.get_database_type()
+            if db_type == "sqlite":
                 # Never store the sessions in the DB if running SQLite
                 result = False
         return result
@@ -941,8 +986,36 @@ class S3Config(Storage):
 
     # -------------------------------------------------------------------------
     # Database settings
+    #
     def get_database_type(self):
+        """
+            Get the database type
+        """
+
         return self.database.get("db_type", "sqlite").lower()
+
+    def get_database_string(self):
+        """
+            Database string and pool-size for PyDAL (models/00_db.py)
+
+            @return: tuple (db_type, db_string, pool_size)
+        """
+
+        parameters = self.db_params
+        db_type = parameters["type"]
+
+        if db_type == "sqlite":
+            db_string = "sqlite://storage.db"
+
+        elif db_type in ("mysql", "postgres"):
+            db_string = "%(type)s://%(username)s:%(password)s@%(host)s:%(port)s/%(database)s" % \
+                       parameters
+
+        else:
+            from gluon import HTTP
+            raise HTTP(501, body="Database type '%s' not recognised - please correct file models/000_config.py." % db_type)
+
+        return (db_type, db_string, self.database.get("pool_size", 30))
 
     def get_database_airegex(self):
         """
@@ -975,32 +1048,6 @@ class S3Config(Storage):
         else:
             airegex = False
         return airegex
-
-    def get_database_string(self):
-        db_type = self.database.get("db_type", "sqlite").lower()
-        pool_size = self.database.get("pool_size", 30)
-        if (db_type == "sqlite"):
-            db_string = "sqlite://storage.db"
-        elif (db_type == "mysql"):
-            db_get = self.database.get
-            db_string = "mysql://%s:%s@%s:%s/%s" % \
-                        (db_get("username", "sahana"),
-                         db_get("password", "password"),
-                         db_get("host", "localhost"),
-                         db_get("port") or "3306",
-                         db_get("database", "sahana"))
-        elif (db_type == "postgres"):
-            db_get = self.database.get
-            db_string = "postgres://%s:%s@%s:%s/%s" % \
-                        (db_get("username", "sahana"),
-                         db_get("password", "password"),
-                         db_get("host", "localhost"),
-                         db_get("port") or "5432",
-                         db_get("database", "sahana"))
-        else:
-            from gluon import HTTP
-            raise HTTP(501, body="Database type '%s' not recognised - please correct file models/000_config.py." % db_type)
-        return (db_string, pool_size)
 
     # -------------------------------------------------------------------------
     # Finance settings
@@ -1459,6 +1506,12 @@ class S3Config(Storage):
             - Default: Map opens in a div
         """
         return self.gis.get("popup_location_link", False)
+
+    def get_gis_xml_wkt(self):
+        """
+            Whether XML exports should include the bulky WKT
+        """
+        return self.gis.get("xml_wkt", False)
 
     # -------------------------------------------------------------------------
     # L10N Settings
@@ -2768,6 +2821,13 @@ class S3Config(Storage):
         """
         return self.dc.get("response_label", "Assessment")
 
+    def get_dc_unique_question_names_per_template(self):
+        """
+            Deduplicate Questions by Name/Template
+             - needed for importing multiple translations
+        """
+        return self.dc.get("unique_question_names_per_template", False)
+
     def get_dc_mobile_data(self):
         """
             Whether Mobile Clients should download Assessments
@@ -3209,6 +3269,26 @@ class S3Config(Storage):
                                                            4: T("Members"),
                                                            })
 
+    def get_hrm_event_course_mandatory(self):
+        """
+            Whether (Training) Events have a Mandatory Course
+        """
+        return self.__lazy("hrm", "event_course_mandatory", default=True)
+
+    #def get_hrm_event_programme(self):
+    #    """
+    #        Whether (Training) Events should be linked to Programmes
+    #    """
+    #    return self.__lazy("hrm", "event_programme", default=False)
+
+    def get_hrm_event_site(self):
+        """
+            How (Training) Events should be Located:
+            - True: use Site
+            - False: use Location (e.g. Country or Country/L1)
+        """
+        return self.__lazy("hrm", "event_site", default=True)
+
     def get_hrm_staff_label(self):
         """
             Label for 'Staff'
@@ -3305,6 +3385,12 @@ class S3Config(Storage):
             If set to True then HRM records are deletable rather than just being able to be marked as obsolete
         """
         return self.hrm.get("deletable", True)
+
+    def get_hrm_event_types(self):
+        """
+            Whether (Training) Events should be of different Types
+        """
+        return self.__lazy("hrm", "event_types", default=False)
 
     def get_hrm_multiple_job_titles(self):
         """
@@ -3459,9 +3545,12 @@ class S3Config(Storage):
             Whether Human Resources should show address tab
         """
         use_address = self.hrm.get("use_address", None)
+
         # Fall back to PR setting if not specified
         if use_address is None:
-            return self.get_pr_use_address()
+            use_address = self.get_pr_use_address()
+
+        return use_address
 
     def get_hrm_use_code(self):
         """
@@ -4256,11 +4345,32 @@ class S3Config(Storage):
     def get_pr_contacts_tabs(self):
         """
             Which tabs to show for contacts: all, public &/or private
+                - a tuple or list with all|private|public, or
+                - a dict with labels per contacts group
+                  (defaults see get_pr_contacts_tab_label)
         """
         contacts_tabs = self.pr.get("contacts_tabs", ("all",))
         if not contacts_tabs:
             return () # iterable expected
         return contacts_tabs
+
+    def get_pr_contacts_tab_label(self, group="all"):
+        """
+            Labels for contacts tabs
+        """
+        defaults = {"all": "Contacts",
+                    "private_contacts": "Private Contacts",
+                    "public_contacts": "Public Contacts",
+                    }
+
+        tabs = self.get_pr_contacts_tabs()
+        label = tabs.get(group) if type(tabs) is dict else None
+
+        if label is None:
+            # Use default label
+            label = defaults.get(group)
+
+        return current.T(label) if label else label
 
     # -------------------------------------------------------------------------
     # Proc

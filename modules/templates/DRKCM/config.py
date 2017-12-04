@@ -37,6 +37,7 @@ def config(settings):
                                                "volunteer": T("Volunteer"),
                                                }
     #settings.auth.registration_link_user_to_default = "staff"
+    settings.auth.password_retrieval = False
 
     # Approval emails get sent to all admins
     settings.mail.approver = "ADMIN"
@@ -65,7 +66,7 @@ def config(settings):
     # Languages used in the deployment (used for Language Toolbar & GIS Locations)
     # http://www.loc.gov/standards/iso639-2/php/code_list.php
     settings.L10n.languages = OrderedDict([
-       ("de", "Deutsch"),
+       ("de", "German"),
        ("en", "English"),
     ])
     # Default language for Language Toolbar (& GIS Locations in future)
@@ -1289,12 +1290,12 @@ def config(settings):
 
             # Represent person_id as link
             field = table.person_id
-            fmt = "%(pe_label)s %(last_name)s, %(first_name)s"
-            field.represent = s3db.pr_PersonRepresent(fields = ("pe_label",
-                                                                "last_name",
-                                                                "first_name",
-                                                                ),
-                                                      labels = fmt,
+            #fmt = "%(pe_label)s %(last_name)s, %(first_name)s"
+            field.represent = s3db.pr_PersonRepresent(#fields = ("pe_label",
+                                                      #          "last_name",
+                                                      #          "first_name",
+                                                      #          ),
+                                                      #labels = fmt,
                                                       show_link = True,
                                                       )
 
@@ -1617,6 +1618,7 @@ def config(settings):
 
                 # Custom list fields
                 list_fields = ["priority",
+                               (T("ID"), "person_id$pe_label"),
                                (T("Case"), "person_id"),
                                "sector_id",
                                "subject",

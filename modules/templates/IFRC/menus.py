@@ -52,10 +52,11 @@ class S3MainMenu(default.S3MainMenu):
 
         if not has_role(ADMIN) and auth.s3_has_roles(("EVENT_MONITOR", "EVENT_ORGANISER", "EVENT_OFFICE_MANAGER")):
             # Simplified menu for Bangkok CCST
-            return [homepage("hrm", "org", name=T("Trainings"), f="training_event",
+            return [homepage("hrm", "org", name=T("Training Events"), f="training_event",
                              #vars=dict(group="staff"), check=hrm)(
                              vars=dict(group="staff"))(
                         #MM("Training Events", c="hrm", f="training_event"),
+                        #MM("Trainings", c="hrm", f="training"),
                         #MM("Training Courses", c="hrm", f="course"),
                         ),
                     ]
@@ -328,15 +329,17 @@ class S3MainMenu(default.S3MainMenu):
         """ Custom Personal Menu """
 
         auth = current.auth
-        s3 = current.response.s3
         settings = current.deployment_settings
+        languages = settings.get_L10n_languages()
+        represent_local = IS_ISO639_2_LANGUAGE_CODE.represent_local
 
         # Language selector
         menu_lang = ML("Language", right=True)
-        for language in s3.l10n_languages.items():
-            code, name = language
+        for code in languages:
+            # Show Language in it's own Language
+            lang_name = represent_local(code)
             menu_lang(
-                ML(name, translate=False, lang_code=code, lang_name=name)
+                ML(lang_name, translate=False, lang_code=code, lang_name=lang_name)
             )
 
         if not auth.is_logged_in():
@@ -608,12 +611,15 @@ class S3OptionsMenu(default.S3OptionsMenu):
     def hrm():
         """ HRM Human Resource Management """
 
-        has_role = current.auth.s3_has_role
+        auth = current.auth
+        has_role = auth.s3_has_role
         ADMIN = current.session.s3.system_roles.ADMIN
 
-        if not has_role(ADMIN) and (has_role("EVENT_MONITOR") or \
-                                    has_role("EVENT_ORGANISER") or \
-                                    has_role("EVENT_OFFICE_MANAGER")):
+        if not has_role(ADMIN) and auth.s3_has_roles(("EVENT_MONITOR", "EVENT_ORGANISER", "EVENT_OFFICE_MANAGER")):
+            if has_role("EVENT_OFFICE_MANAGER"):
+                # Just their Dashboard
+                return M()(M("Training Events", c="hrm", f="training_event")())
+
             return M()(
                         M("Training Events", c="hrm", f="training_event")(
                             M("Create", m="create"),
@@ -627,6 +633,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                             #M("Create", m="create"),
                             #M("Import", f="person", m="import",
                             #  vars={"group": "staff"}, p="create"),
+                            M("EOs", f="staff", m=None, vars={"eo": 1}),
                         ),
                         M("National Societies", c="org",
                                                 f="organisation",

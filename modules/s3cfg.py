@@ -452,6 +452,12 @@ class S3Config(Storage):
         """
         return self.auth.get("password_changes", True)
 
+    def get_auth_password_retrieval(self):
+        """
+            Allow password retrieval?
+        """
+        return self.__lazy("auth", "password_retrieval", default=True)
+
     def get_auth_password_min_length(self):
         """
             To set the Minimum Password Length
@@ -2263,6 +2269,17 @@ class S3Config(Storage):
         """
         return self.msg.get("basestation_code_unique", False)
 
+    def get_msg_send_postprocess(self):
+        """
+            Custom function that processes messages after they have been sent, eg.
+            link alert_id in cap module to message_id in message module
+            The function can be of form msg_send_postprocess(message_id, **data),
+            where message_id is the msg_message_id and 
+            **data is the additional arguments to pass to s3msg.send_by_pe_id
+        """
+
+        return self.msg.get("send_postprocess")
+
     # -------------------------------------------------------------------------
     # Mail settings
     def get_mail_server(self):
@@ -2278,11 +2295,13 @@ class S3Config(Storage):
              - GMail is True
         """
         return self.mail.get("tls", False)
+
     def get_mail_sender(self):
         """
             The From Address for all Outbound Emails
         """
         return self.mail.get("sender")
+
     def get_mail_approver(self):
         """
             The default Address to send Requests for New Users to be Approved
@@ -2362,6 +2381,20 @@ class S3Config(Storage):
         """
 
         return self.msg.get("notify_attachment")
+
+    def get_msg_notify_send_data(self):
+        """
+            Custom function that returns additional arguments to pass to
+            s3msg.send_by_pe_id
+
+            The function should be of the form:
+            custom_msg_notify_send_data(resource, data, meta_data), where
+            resource is the S3Resource, data: the data returned from
+            S3Resource.select and meta_data: the meta data for the notification
+            (see s3notify for the metadata)
+        """
+
+        return self.msg.get("notify_send_data")
 
     # -------------------------------------------------------------------------
     # SMS
@@ -2559,12 +2592,12 @@ class S3Config(Storage):
                 http://www.i18nguy.com/unicode/language-identifiers.html
         """
 
-        return self.cap.get("languages", OrderedDict([("ar", "العربية"),
+        return self.cap.get("languages", OrderedDict([("ar", "Arabic"),
                                                       ("en-US", "English"),
-                                                      ("es", "Español"),
-                                                      ("fr", "Français"),
-                                                      ("pt", "Português"),
-                                                      ("ru", "русский"),
+                                                      ("es", "Spanish"),
+                                                      ("fr", "French"),
+                                                      ("pt", "Portuguese"),
+                                                      ("ru", "Russian"),
                                                       ]))
 
     def get_cap_authorisation(self):
@@ -2834,6 +2867,12 @@ class S3Config(Storage):
             - e.g. when these are created through Targetting
         """
         return self.dc.get("mobile_data", False)
+
+    def get_dc_mobile_inserts(self):
+        """
+            Whether Mobile Clients should create Assessments locally
+        """
+        return self.dc.get("mobile_inserts", True)
 
     # -------------------------------------------------------------------------
     # Deployments
@@ -3108,7 +3147,7 @@ class S3Config(Storage):
         """
             Whether deleting an Event cascades to deleting all Incidents or whether it sets NULL
             - 'normal' workflow is where an Event is created and within that various Incidents,
-              aso cascading the delete makes sense here ("delete everything associated with this event")
+              so cascading the delete makes sense here ("delete everything associated with this event")
             - WA COP uses Events to group existing Incidents, so here we don't wish to delete the Incidents if the Event is deleted
 
             NB Changing this setting requires a DB migration
@@ -3120,6 +3159,18 @@ class S3Config(Storage):
             Whether Events can be Exercises
         """
         return self.event.get("exercise", False)
+
+    def get_event_sitrep_dynamic(self):
+        """
+            Whether the SitRep resource should include a Dynamic Table section
+        """
+        return self.event.get("sitrep_dynamic", False)
+
+    def get_event_sitrep_edxl(self):
+        """
+            Whether the SitRep resource should be configured for EDXL-Sitrep mode
+        """
+        return self.event.get("sitrep_edxl", False)
 
     def get_event_types_hierarchical(self):
         """
@@ -3392,6 +3443,15 @@ class S3Config(Storage):
         """
         return self.__lazy("hrm", "event_types", default=False)
 
+    def get_hrm_job_title_deploy(self):
+        """
+            Whether the 'deploy' Job Title type should be used
+        """
+        job_title_deploy = self.hrm.get("job_title_deploy", None)
+        if job_title_deploy is None:
+            job_title_deploy = self.has_module("deploy")
+        return job_title_deploy
+
     def get_hrm_multiple_job_titles(self):
         """
             If set to True then HRs can have multiple Job Titles
@@ -3529,7 +3589,9 @@ class S3Config(Storage):
 
     def get_hrm_create_certificates_from_courses(self):
         """
-            If set to True then Certificates are created automatically for each Course
+            If set Truthy then Certificates are created automatically for each Course
+                True: Create Certificates without an organisation_id
+                "organisation_id": Create Certificates with the organisation_id of the Course
         """
         return self.hrm.get("create_certificates_from_courses", False)
 

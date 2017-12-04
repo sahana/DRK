@@ -36,6 +36,7 @@ __all__ = ("S3ACLWidget",
            "S3AddObjectWidget",
            "S3AddPersonWidget",
            "S3AddPersonWidget2",
+           "S3AgeWidget",
            "S3AutocompleteWidget",
            "S3BooleanWidget",
            "S3ColorPickerWidget",
@@ -1811,6 +1812,98 @@ i18n.grandfather_name_label="%s:"''' % (i18n,
                        )
 
 # =============================================================================
+class S3AgeWidget(FormWidget):
+    """
+        Widget to accept and represent date of birth as age in years,
+        mapping the age to a pseudo date-of-birth internally so that
+        it progresses over time; contains both widget and representation
+        method
+
+        @example:
+            s3_date("date_of_birth",
+                    label = T("Age"),
+                    widget = S3AgeWidget.widget,
+                    represent = lambda v: S3AgeWidget.date_as_age(v) \
+                                          if v else current.messages["NONE"],
+                    ...
+                    )
+    """
+
+    @classmethod
+    def widget(cls, field, value, **attributes):
+        """
+            The widget method, renders a simple integer-input
+
+            @param field: the Field
+            @param value: the current or default value
+            @param attributes: additional HTML attributes for the widget
+        """
+
+        if isinstance(value, basestring) and value and not value.isdigit():
+            # ISO String
+            value = current.calendar.parse_date(value)
+
+        age = cls.date_as_age(value)
+
+        attr = IntegerWidget._attributes(field, {"value": age}, **attributes)
+
+        # Inner validation
+        requires = (IS_INT_IN_RANGE(0, 150), cls.age_as_date)
+
+        # Accept empty if field accepts empty
+        if isinstance(field.requires, IS_EMPTY_OR):
+            requires = IS_EMPTY_OR(requires)
+        attr["requires"] = requires
+
+        return INPUT(**attr)
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def date_as_age(value, row=None):
+        """
+            Convert a date value into age in years, can be used as
+            representation method
+
+            @param value: the date
+
+            @return: the age in years (integer)
+        """
+
+        if value and isinstance(value, datetime.date):
+            from dateutil.relativedelta import relativedelta
+            age = relativedelta(current.request.utcnow, value).years
+        else:
+            age = value
+        return age
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def age_as_date(value, error_message="invalid age"):
+        """
+            Convert age in years into an approximate date of birth, acts
+            as inner validator of the widget
+
+            @param value: age value
+            @param error_message: error message (override)
+
+            @returns: tuple (date, error)
+        """
+
+        try:
+            age = int(value)
+        except ValueError:
+            return None, error_message
+
+        from dateutil.relativedelta import relativedelta
+        date = (current.request.utcnow - relativedelta(years=age)).date()
+
+        # Map back to January 1st of the year of birth
+        # => common practice, but needs validation as requirement
+        date = date.replace(month=1, day=1)
+
+        return date, None
+
+# =============================================================================
 class S3AutocompleteWidget(FormWidget):
     """
         Renders a SELECT as an INPUT field with AJAX Autocomplete
@@ -2065,7 +2158,8 @@ class S3CalendarWidget(FormWidget):
         - uses jQuery UI DatePicker for Gregorian calendars: https://jqueryui.com/datepicker/
         - uses jQuery UI Timepicker-addon if using times: http://trentrichardson.com/examples/timepicker
         - uses Calendars for non-Gregorian calendars: http://keith-wood.name/calendars.html
-            (ensure that calendars/ui-smoothness.calendars.picker.css is in css.cfg for that)
+            (for this, ensure that css.cfg includes calendars/ui.calendars.picker.css and
+                                                    calendars/ui-smoothness.calendars.picker.css)
     """
 
     def __init__(self,
@@ -3302,6 +3396,8 @@ class S3GroupedOptionsWidget(FormWidget):
                  sort=True,
                  orientation=None,
                  table=True,
+                 no_opts=None,
+                 option_comment=None,
                  ):
         """
             Constructor
@@ -3320,6 +3416,8 @@ class S3GroupedOptionsWidget(FormWidget):
             @param sort: sort the options (only effective if size==None)
             @param orientation: the ordering orientation, "columns"|"rows"
             @param table: whether to render options inside a table or not
+            @param no_opts: text to show if no options available
+            @param comment: HTML template to render after the LABELs
         """
 
         self.options = options
@@ -3331,6 +3429,8 @@ class S3GroupedOptionsWidget(FormWidget):
         self.sort = sort
         self.orientation = orientation
         self.table = table
+        self.no_opts = no_opts
+        self.option_comment = option_comment
 
     # -------------------------------------------------------------------------
     def __call__(self, field, value, **attributes):
@@ -3366,13 +3466,21 @@ class S3GroupedOptionsWidget(FormWidget):
                 for option in options:
                     append(option)
 
+        no_opts = self.no_opts
+        if no_opts is None:
+            no_opts = s3_str(current.T("No options available"))
         widget.add_class("groupedopts-widget")
         widget_opts = {"columns": self.cols,
-                       "emptyText": s3_str(current.T("No options available")),
+                       "emptyText": no_opts,
                        "orientation": self.orientation or "columns",
                        "sort": self.sort,
                        "table": self.table,
                        }
+
+        if self.option_comment:
+            widget_opts["comment"] = self.option_comment
+            s3_include_underscore()
+
         script = '''$('#%s').groupedopts(%s)''' % \
                  (_id, json.dumps(widget_opts, separators=SEPARATORS))
         jquery_ready = current.response.s3.jquery_ready

@@ -20,8 +20,13 @@ def download():
     try:
         filename = request.args[0]
     except:
-        session.error("Need to specify the file to download!")
-        redirect(URL(f="index"))
+        # No legitimate interactive request comes here without a filename,
+        # so this hits mainly non-interactive clients, and those do not
+        # recognize an error condition from a HTTP 303 => better to raise
+        # a proper error than to redirect:
+        raise HTTP(400, "No file specified")
+        #session.error = T("Need to specify the file to download!")
+        #redirect(URL(f="index"))
 
     # Check Permissions
     tablename = filename.split(".", 1)[0]
@@ -411,9 +416,9 @@ def organisation():
 
     resource = s3db.resource("org_organisation")
     totalrows = resource.count()
-    display_start = int(get_vars.displayStart) if get_vars.displayStart else 0
-    display_length = int(get_vars.pageLength) if get_vars.pageLength else 10
-    limit = 4 * display_length
+    display_start = int(get_vars.start) if get_vars.start else 0
+    display_length = int(get_vars.limit) if get_vars.limit else 10
+    limit = display_length
 
     list_fields = ["id", "name"]
     default_orderby = orderby = "org_organisation.name asc"
@@ -423,6 +428,8 @@ def organisation():
             orderby = default_orderby
         if query:
             resource.add_filter(query)
+    else:
+        limit = 4 * limit
 
     data = resource.select(list_fields,
                            start=display_start,
@@ -550,6 +557,10 @@ def user():
         # Block Password changes as these are managed externally (OpenID / SMTP / LDAP)
         auth_settings.actions_disabled = ("change_password",
                                           "retrieve_password",
+                                          )
+    elif not settings.get_auth_password_retrieval():
+        # Block password retrieval
+        auth_settings.actions_disabled = ("retrieve_password",
                                           )
 
     # Check for template-specific customisations

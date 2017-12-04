@@ -2,7 +2,9 @@
 {
 'agree': 'setuju',
 'all of it': 'seluruhnya',
+'Dear %(person_name)s': 'Kepada %(person_name)s',
 'disagree': 'tidak setuju',
+'Indonesian': 'Bahasa Indonesia',
 'most of it': 'sebagian besar',
 'no': 'tidak',
 'no change': 'tidak ada perubahan',
@@ -12,5 +14,10 @@
 'some change': 'sedikit perubahan',
 'strongly agree': 'sangat setuju',
 'strongly disagree': 'sangat tidak setuju',
+'Thank you for taking this survey and helping us to increase the quality of our trainings.': 'Terima kasih, dengan mengisi kuesioner ini, Anda telah membantu kami untuk meningkatkan kualitas pelatihan.',
+'Thank you for your participation.': 'Terima kasih atas partisipasi Anda.',
+'The information collected through this questionnaire will be treated as confidential.': 'Informasi yang dikumpulkan melalui kuesioner ini sifatnya rahasia.',
+'We have 8 simple questions for you, this should not take more than 15mn of your time.': 'Berikut 8 pertanyaan yang tidak akan menyita lebih dari 15 menit dari waktu Anda.',
 'yes': 'ya',
+'You are receiving this email as a participant of %(event_name)s held in %(location)s on %(date)s.': 'Anda menerima email ini sebagai peserta pelatihan %(event_name)s yang diadakan di %(location)s pada %(date)s.',
 }

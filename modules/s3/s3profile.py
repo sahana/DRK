@@ -2,7 +2,7 @@
 
 """ S3 Profile
 
-    @copyright: 2009-2017 (c) Sahana Software Foundation
+    @copyright: 2009-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -453,12 +453,13 @@ class S3Profile(S3CRUD):
                 r.error(405, current.ERROR.BAD_METHOD)
 
         # dataList
-        datalist, numrows, ids = resource.datalist(fields=list_fields,
-                                                   start=start,
-                                                   limit=limit,
-                                                   list_id=list_id,
-                                                   orderby=orderby,
-                                                   layout=list_layout)
+        datalist, numrows = resource.datalist(fields = list_fields,
+                                              start = start,
+                                              limit = limit,
+                                              list_id = list_id,
+                                              orderby = orderby,
+                                              layout = list_layout,
+                                              )
         # Render the list
         ajaxurl = r.url(vars={"update": widget["index"]},
                         representation="dl")
@@ -638,10 +639,11 @@ class S3Profile(S3CRUD):
                 dt_pagination = "false"
 
             # Get the data table
-            dt, totalrows, ids = resource.datatable(fields=list_fields,
-                                                    start=start,
-                                                    limit=limit,
-                                                    orderby=orderby)
+            dt, totalrows = resource.datatable(fields=list_fields,
+                                               start=start,
+                                               limit=limit,
+                                               orderby=orderby,
+                                               )
             displayrows = totalrows
 
             if dt.empty:
@@ -657,7 +659,8 @@ class S3Profile(S3CRUD):
             # @todo: fix base URL (make configurable?) to fix export options
             s3.no_formats = True
             dtargs["dt_base_url"] = r.url(method="", vars={})
-            dtargs["dt_ajax_url"] = r.url(vars={"update": widget["index"]},
+            get_vars.update(update = widget["index"])
+            dtargs["dt_ajax_url"] = r.url(vars=get_vars,
                                           representation="aadata")
             actions = widget_get("actions")
             if callable(actions):
@@ -732,12 +735,12 @@ class S3Profile(S3CRUD):
 
             # Get the data table
             if totalrows != 0:
-                dt, displayrows, ids = resource.datatable(fields=list_fields,
-                                                          start=start,
-                                                          limit=limit,
-                                                          left=left,
-                                                          orderby=orderby,
-                                                          getids=False)
+                dt, displayrows = resource.datatable(fields = list_fields,
+                                                     start = start,
+                                                     limit = limit,
+                                                     left = left,
+                                                     orderby = orderby,
+                                                     )
             else:
                 dt, displayrows = None, 0
 

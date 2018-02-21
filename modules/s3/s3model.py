@@ -2,7 +2,7 @@
 
 """ S3 Data Model Extensions
 
-    @copyright: 2009-2017 (c) Sahana Software Foundation
+    @copyright: 2009-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -33,15 +33,12 @@ __all__ = ("S3Model",
 
 from collections import OrderedDict
 
-from gluon import *
-# Here are dependencies listed for reference:
-#from gluon import current
-#from gluon.dal import Field
-#from gluon.validators import IS_EMPTY_OR, IS_IN_SET, IS_NOT_EMPTY
+from gluon import current, IS_EMPTY_OR, IS_FLOAT_IN_RANGE, IS_INT_IN_RANGE, \
+                  IS_IN_SET, IS_NOT_EMPTY, SQLFORM, TAG
 from gluon.storage import Storage
 from gluon.tools import callback
 
-from s3dal import Table, Field
+from s3dal import Table, Field, original_tablename
 from s3navigation import S3ScriptItem
 from s3resource import S3Resource
 from s3validators import IS_ONE_OF
@@ -110,15 +107,21 @@ class S3Model(object):
             self.__lock()
             if module in mandatory_models or \
                current.deployment_settings.has_module(module):
-                env = self.model()
+                try:
+                    env = self.model()
+                except Exception:
+                    self.__unlock()
+                    raise
             else:
-                env = self.defaults()
+                try:
+                    env = self.defaults()
+                except Exception:
+                    self.__unlock()
+                    raise
             if isinstance(env, (Storage, dict)):
                 response.s3.update(env)
             self.__loaded(True)
             self.__unlock()
-
-        return
 
     # -------------------------------------------------------------------------
     def __loaded(self, loaded=None):
@@ -376,8 +379,8 @@ class S3Model(object):
         s3.all_models_loaded = True
 
     # -------------------------------------------------------------------------
-    @classmethod
-    def define_table(cls, tablename, *fields, **args):
+    @staticmethod
+    def define_table(tablename, *fields, **args):
         """
             Same as db.define_table except that it does not repeat
             a table definition if the table is already defined.
@@ -389,6 +392,34 @@ class S3Model(object):
         else:
             table = db.define_table(tablename, *fields, **args)
         return table
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def get_aliased(table, alias):
+        """
+            Helper method to get a Table instance with alias; prevents
+            re-instantiation of an already existing alias for the same
+            table (which can otherwise lead to name collisions in PyDAL).
+
+            @param table: the original table
+            @param alias: the alias
+
+            @return: the aliased Table instance
+        """
+
+        db = current.db
+
+        if hasattr(db, alias):
+            aliased = ogetattr(db, alias)
+            if original_tablename(aliased) == original_tablename(table):
+                return aliased
+
+        aliased = table.with_alias(alias)
+        if aliased._id.table != aliased:
+            # Older PyDAL not setting _id attribute correctly
+            aliased._id = aliased[table._id.name]
+
+        return aliased
 
     # -------------------------------------------------------------------------
     # Resource configuration
@@ -508,7 +539,7 @@ class S3Model(object):
                 if current_cb:
                     callbacks[m] = extend(current_cb, cb)
         else:
-            current_cb = callbacks[m]
+            current_cb = callbacks[method]
             if current_cb:
                 callbacks[method] = extend(current_cb, cb)
             else:
@@ -636,7 +667,7 @@ class S3Model(object):
             hooks = Storage()
         for tablename, ll in links.items():
 
-            prefix, name = tablename.split("_", 1)
+            name = tablename.split("_", 1)[1]
             if not isinstance(ll, (tuple, list)):
                 ll = [ll]
 
@@ -656,6 +687,10 @@ class S3Model(object):
                     defaults = None
                     multiple = True
                     filterby = None
+                    # @ToDo: use these as fallback for RHeader Tabs on Web App
+                    #        (see S3ComponentTab.__init__)
+                    label = None
+                    plural = None
 
                 elif isinstance(link, dict):
                     alias = link.get("name", name)
@@ -710,6 +745,8 @@ class S3Model(object):
                     defaults = link.get("defaults")
                     multiple = link.get("multiple", True)
                     filterby = link.get("filterby")
+                    label = link.get("label")
+                    plural = link.get("plural")
 
                 else:
                     continue
@@ -726,6 +763,8 @@ class S3Model(object):
                                     defaults=defaults,
                                     multiple=multiple,
                                     filterby=filterby,
+                                    label=label,
+                                    plural=plural,
                                     )
                 hooks[alias] = component
 
@@ -852,9 +891,7 @@ class S3Model(object):
                 return None
 
         # Single alias?
-        single = False
         if isinstance(names, str):
-            single = True
             names = set([names])
         elif names is not None:
             names = set(names)
@@ -937,6 +974,8 @@ class S3Model(object):
                                 prefix=prefix,
                                 name=name,
                                 alias=alias,
+                                label=hook.label,
+                                plural=hook.plural,
                                 )
 
             if hook.supertable is not None:
@@ -1090,7 +1129,7 @@ class S3Model(object):
                 for alias in hooks:
                     hook = hooks[alias]
                     if hook.linktable:
-                        prefix, name = hook.linktable.split("_", 1)
+                        name = hook.linktable.split("_", 1)[1]
                         if name == link:
                             return alias
             return None
@@ -1463,6 +1502,10 @@ class S3Model(object):
 
         # Update the super_keys in the record
         if super_keys:
+            # System update => don't update modified_by/on
+            if "modified_on" in table.fields:
+                super_keys["modified_by"] = table.modified_by
+                super_keys["modified_on"] = table.modified_on
             db(table.id == record_id).update(**super_keys)
 
         record.update(super_keys)
@@ -1701,6 +1744,7 @@ class S3DynamicModel(object):
                 # CRUD Form
                 crud_fields = settings.get("form")
                 if crud_fields:
+                    from s3forms import S3SQLCustomForm
                     try:
                         crud_form = S3SQLCustomForm(**crud_fields)
                     except:
@@ -2017,7 +2061,6 @@ class S3DynamicModel(object):
         ktable = current.s3db.table(ktablename)
         if ktable:
             from s3fields import S3Represent
-            from s3validators import IS_ONE_OF
             if "name" in ktable.fields:
                 represent = S3Represent(lookup = ktablename,
                                         translate = True,

@@ -2,7 +2,7 @@
 
 """ Sahana Eden Stats Model
 
-    @copyright: 2012-2017 (c) Sahana Software Foundation
+    @copyright: 2012-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -1424,8 +1424,7 @@ class S3StatsPeopleModel(S3Model):
                      self.gis_location_id(label = T("Address"),
                                           ),
                      self.pr_person_id(label = T("Contact Person"),
-                                       requires = IS_ADD_PERSON_WIDGET2(allow_empty=True),
-                                       widget = S3AddPersonWidget2(controller="pr"),
+                                       widget = S3AddPersonWidget(controller="pr"),
                                        ),
                      s3_comments(),
                      *s3_meta_fields())

@@ -1625,7 +1625,6 @@ def config(settings):
         rheader_fields = []
 
         if record:
-            T = current.T
 
             if tablename == "dc_template":
 
@@ -1643,6 +1642,8 @@ def config(settings):
                         (T("Answers"), "answer"),
                         #(T("Attachments"), "document"),
                         )
+
+                from gluon import A, URL
 
                 db = current.db
 
@@ -1673,7 +1674,6 @@ def config(settings):
                         return email or other
                     else:
                         # @ToDo: Provide an Edit button
-                        from gluon import A
                         return A(T("Add"))
 
                 etable = s3db.hrm_training_event
@@ -1683,6 +1683,7 @@ def config(settings):
                         (ltable.target_id == ttable.id) & \
                         (ltable.training_event_id == etable.id)
                 training_event = db(query).select(ttable.date,
+                                                  etable.id,
                                                   etable.name,
                                                   etable.start_date,
                                                   etable.location_id,
@@ -1691,7 +1692,9 @@ def config(settings):
 
                 def event_name(record):
                     try:
-                        return training_event["hrm_training_event"].name
+                        return A(training_event["hrm_training_event"].name,
+                                 _href=URL(c="hrm", f="training_event", args=training_event["hrm_training_event"].id),
+                                 )
                     except:
                         return current.messages["NONE"]
 
@@ -1731,7 +1734,7 @@ def config(settings):
 
             elif tablename == "dc_target":
 
-                tabs = ((T("Basic Details"), None, {"native": 1}),
+                tabs = ((T("Basic Details"), None),
                         (T("Responses"), "response"),
                         )
 
@@ -1815,7 +1818,7 @@ def config(settings):
             Set the Date of the Response when the Answers are added
         """
 
-        record_id = form.vars.get("id")
+        #record_id = form.vars.get("id")
 
         # Retrieve the tablename set in prep
         dtablename = current.response.s3.dc_dtablename
@@ -1892,7 +1895,7 @@ def config(settings):
 
                     current.s3db.configure("dc_response",
                                            insertable = False,
-                                           list_fields = [(current.T("Event"), "target_id$training_event__link.training_event_id"),
+                                           list_fields = [(T("Event"), "target_id$training_event__link.training_event_id"),
                                                           "date",
                                                           "person_id",
                                                           ],
@@ -1900,6 +1903,22 @@ def config(settings):
 
             return result
         s3.prep = custom_prep
+
+        # Custom postp
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+            # Call standard postp
+            if callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if r.interactive and r.component_name == "answer":
+                script = '''$('#component').prepend('<div>%s<br>%s</div>')''' % \
+                    (T("The questionnaire is available in all SEA languages, please change the language to your need on the upper-right corner of your screen."),
+                     T("Do this before filling in the data."))
+                s3.jquery_ready.append(script)
+
+            return output
+        s3.postp = custom_postp
 
         attr["rheader"] = dc_rheader
 
@@ -1956,12 +1975,12 @@ def config(settings):
 
             if r.interactive and r.component_name == "response":
 
-                s3db.configure("dc_response",
-                               insertable = False,
-                               list_fields = ["person_id",
-                                              "date",
-                                              ],
-                               )
+                current.s3db.configure("dc_response",
+                                       insertable = False,
+                                       list_fields = ["person_id",
+                                                      "date",
+                                                      ],
+                                       )
 
             return result
         s3.prep = custom_prep
@@ -1976,8 +1995,8 @@ def config(settings):
             if r.interactive and r.component_name == "response":
                 from gluon import URL
                 from s3 import S3CRUD
-                update_url = URL(f="respnse", args = ["[id]", "answer"])
-                S3CRUD.action_buttons(r, update_url=update_url)
+                open_url = URL(f="respnse", args = ["[id]", "answer"])
+                S3CRUD.action_buttons(r, read_url=open_url, update_url=open_url)
 
             return output
         s3.postp = custom_postp
@@ -1995,11 +2014,10 @@ def config(settings):
             - exclude Observers
         """
 
-        T = current.T
         auth = current.auth
         db = current.db
         s3db = current.s3db
-        
+
 
         import time
         from gluon import URL
@@ -2049,6 +2067,15 @@ def config(settings):
                 htable.on(htable.person_id == ptable.id),
                 ctable.on((ctable.pe_id == ptable.pe_id) & (ctable.contact_method=="EMAIL") & (ctable.deleted == False)),
                 ]
+        # Exclude participants that we have already notified
+        rtable = s3db.dc_response
+        nquery = (rtable.target_id == target_id) & \
+                 (rtable.template_id == template_id) & \
+                 (rtable.deleted == False)
+        notified = db(nquery).select(rtable.person_id)
+        exclude = [n.person_id for n in notified]
+        if exclude:
+            query &= (~ptable.id.belongs(exclude))
         persons = db(query).select(ptable.id,
                                    ptable.pe_id,
                                    ptable.first_name,
@@ -2093,10 +2120,25 @@ def config(settings):
 
         # Send localised email to each person
         # @ToDo: Group by Language?
+        #db_type = settings.get_database_type()
+        #if db_type == "postgres":
+        #    try:
+        #        from psycopg2 import IntegrityError
+        #    except ImportError
+        #        from gluon.contrib.pg8000 import IntegrityError
+        #elif db_type == "sqlite":
+        #    from sqlite3 import IntegrityError
+        #else:
+        #    # MySQL
+        #    try:
+        #        from MySQLdb import IntegrityError
+        #    except ImportError:
+        #        from gluon.contrib.pymysql import IntegrityError
+        errors = {}
+        success = 0
         s3 = current.response.s3
         s3.bulk = True # Don't send a Welcome Message for new users as we send our own message instead
         send_email = current.msg.send_by_pe_id
-        rtable = s3db.dc_response
         rtable.date.default = None # Set the date when we answer
         rinsert = rtable.insert
         uinsert = utable.insert
@@ -2105,6 +2147,7 @@ def config(settings):
         update_super = s3db.update_super
         for p in persons:
             person = p["pr_person"]
+            person_id = person.id
             user_id = p.get("auth_user.id")
             if user_id:
                 NEW_USER = False
@@ -2117,25 +2160,54 @@ def config(settings):
                 if not email:
                     # Cannot create User account for this person
                     continue
+                first_name = person.first_name
+                last_name = person.last_name
+                # Check if there is already a User Account with this email
+                exists = db(utable.email == email).select(utable.id,
+                                                          limitby = (0, 1)
+                                                          ).first()
+                if exists:
+                    # Log error
+                    errors[person_id] = {#"error": "Cannot create User as there is already a User Account with this email address",
+                                         "first_name": first_name,
+                                         "last_name": last_name,
+                                         }
+                    # Continue to notify the rest of the participants
+                    continue
+
                 hr = p.get("hrm_human_resource")
                 reset_password_key = str(int(time.time())) + "-" + web2py_uuid() # format from auth.email_reset_password()
                 # Fallback language based on Target
                 lang = default_language
-                user = Storage(first_name = person.first_name,
-                               last_name = person.last_name,
+                user = Storage(first_name = first_name,
+                               last_name = last_name,
+                               language = lang,
                                email = email,
                                organisation_id = hr.organisation_id,
                                site_id = hr.site_id,
                                reset_password_key = reset_password_key,
                                )
+                # Commit, because we may need to revert
+                #db.commit()
+                #try:
                 user_id = uinsert(**user)
+                #except IntegrityError, e:
+                #    # So far this has always been: IntegrityError: duplicate key value violates unique constraint "auth_user_email_key"
+                #    db.rollback()
+                #    # Log error
+                #    errors.append({person_id: {"error": e,
+                #                               "first_name": first_name,
+                #                               "last_name": last_name,
+                #                               }})
+                #    # Continue to notify the rest of the participants
+                #    continue
                 user.id = user_id
                 approve_user(user)
 
             # Create response (so that User only needs oacl UPDATE not uacl READ|CREATE
             record = dict(target_id = target_id,
                           template_id = template_id,
-                          person_id = person.id,
+                          person_id = person_id,
                           owned_by_user = user_id,
                           )
             response_id = rinsert(**record)
@@ -2197,12 +2269,15 @@ def config(settings):
                        subject = translation["s"],
                        message = message,
                        )
+            success += 1
 
         s3.bulk = False
 
         # Restore language for UI
         session_s3.language = ui_language
         T.force(ui_language)
+
+        return success, errors
 
     # -------------------------------------------------------------------------
     def dc_target_onapprove(row):
@@ -2221,9 +2296,34 @@ def config(settings):
                                                                           limitby = (0, 1),
                                                                           ).first()
 
-        hrm_notify_participants(training_event.training_event_id)
+        success, errors = hrm_notify_participants(training_event.training_event_id)
 
-        current.response.confirmation = current.T("Notifications sent!")
+        if errors:
+            from gluon import A, URL
+            from s3 import s3_str
+            bad = ""
+            for e in errors:
+                error = errors[e]
+                #new_error = "%s: %s" % (A("%s %s" % (error["first_name"],
+                #                                     error["last_name"]),
+                #                          _href=URL(c="hrm", f="person", args=e)),
+                #                        error["error"])
+                new_error = A("%s %s" % (error["first_name"],
+                                         error["last_name"]),
+                              _href=URL(c="hrm", f="person", args=e))
+                if bad:
+                    bad = "%s, %s" % (bad, new_error)
+                else:
+                    bad = new_error
+            current.response.warning = "%s: %s" % (s3_str(T("%i Notifications sent, but these participants couldn't be notified as User Accounts already exist with these email addresses")) % success,
+                                                   bad
+                                                   )
+        elif success:
+            from s3 import s3_str
+            current.response.confirmation = s3_str(T("%i Notifications sent!")) % success
+
+        else:
+            current.response.information = T("No Notifications needed sending!")
 
     # -------------------------------------------------------------------------
     def customise_dc_target_resource(r, tablename):
@@ -2253,7 +2353,7 @@ def config(settings):
         # Expose the Language Option
         f = table.language
         f.readable = f.writable = True
-        f.label = current.T("Default Language")
+        f.label = T("Default Language")
         f.requires.other._select = OrderedDict([("en-gb", "English"),
                                                 ("my", "Burmese"),
                                                 ("id", "Indonesian"),
@@ -2435,7 +2535,6 @@ def config(settings):
                 _title="%s|%s" % (MEMBER,
                                   current.messages.AUTOCOMPLETE_HELP))
 
-        from s3 import IS_ONE_OF
         s3db = current.s3db
         atable = s3db.deploy_assignment
         atable.human_resource_id.label = MEMBER
@@ -2607,14 +2706,14 @@ def config(settings):
                        (T("Deploying NS"), "human_resource_id$organisation_id"),
                       ]
         report_options = Storage(
-            rows=report_axis,
-            cols=report_axis,
-            fact=report_fact,
-            defaults=Storage(rows="mission_id$location_id",
-                             cols="mission_id$event_type_id",
-                             fact="count(human_resource_id)",
-                             totals=True
-                             )
+            rows = report_axis,
+            cols = report_axis,
+            fact = report_fact,
+            defaults = Storage(rows="mission_id$location_id",
+                               cols="mission_id$event_type_id",
+                               fact="count(human_resource_id)",
+                               totals=True
+                               )
             )
 
         s3db.configure("deploy_assignment",
@@ -3100,8 +3199,6 @@ def config(settings):
     def rdrt_member_profile_header(r):
         """ Custom profile header to allow update of RDRT roster status """
 
-        import json
-
         record = r.record
         if not record:
             return ""
@@ -3144,7 +3241,7 @@ def config(settings):
                               _id = "rdrt-organisation",
                               _title = EDIT,
                               )
-            org_opts = ofield.requires.options()
+            #org_opts = ofield.requires.options()
             #org_opts = {key: value for (key, value) in org_opts}
             org_script = '''$.rdrtOrg('%(url)s','%(submit)s')''' % \
                 {"url": URL(c="deploy", f="human_resource",
@@ -3338,7 +3435,6 @@ def config(settings):
         root_org = current.auth.root_org_name()
         controller = r.controller
         if controller == "vol":
-            T = current.T
             if root_org == IRCS:
                 s3db = current.s3db
                 table = s3db.hrm_human_resource
@@ -3347,8 +3443,10 @@ def config(settings):
                     from s3 import s3_fullname
                     return s3_fullname(current.auth.s3_logged_in_person())
                 settings.hrm.vol_service_record_manager = vol_service_record_manager
-                from s3 import IS_ADD_PERSON_WIDGET2, S3SQLCustomForm, S3SQLInlineComponent
-                table.person_id.requires = IS_ADD_PERSON_WIDGET2(first_name_only = True)
+                from s3 import S3AddPersonWidget, S3SQLCustomForm, S3SQLInlineComponent
+                table.person_id.widget = S3AddPersonWidget(controller = "vol",
+                                                           first_name_only = True,
+                                                           )
                 table.code.label = T("Appointment Number")
                 phtable = s3db.hrm_programme_hours
                 phtable.date.label = T("Direct Date")
@@ -3406,19 +3504,20 @@ def config(settings):
 
         elif controller == "hrm":
             if root_org == IRCS:
-                T = current.T
                 s3db = current.s3db
                 table = s3db.hrm_human_resource
                 table.start_date.label = T("Appointment Date")
                 # All staff have open-ended contracts
                 table.end_date.readable = table.end_date.writable = False
-                from s3 import IS_ADD_PERSON_WIDGET2, S3SQLCustomForm, S3SQLInlineComponent
-                table.person_id.requires = IS_ADD_PERSON_WIDGET2(first_name_only = True)
+                from s3 import S3AddPersonWidget, S3SQLCustomForm, S3SQLInlineComponent
+                table.person_id.widget = S3AddPersonWidget(controller = "hrm",
+                                                           first_name_only = True,
+                                                           )
                 table.code.label = T("Appointment Number")
                 hrm_status_opts = s3db.hrm_status_opts
                 hrm_status_opts[3] = T("End Service")
                 table.status.represent = lambda opt: \
-                                         hrm_status_opts.get(opt, UNKNOWN_OPT),
+                                         hrm_status_opts.get(opt, current.messages.UNKNOWN_OPT),
                 from gluon.validators import IS_IN_SET
                 table.status.requires = IS_IN_SET(hrm_status_opts,
                                                   zero=None)
@@ -3457,13 +3556,14 @@ def config(settings):
 
         from s3 import FS
 
-        T = current.T
         db = current.db
         s3db = current.s3db
         auth = current.auth
         s3 = current.response.s3
         request = current.request
         controller = request.controller
+        # Enable scalability-optimized strategies
+        settings.base.bigtable = True
 
         tablename = "hrm_human_resource"
 
@@ -3596,7 +3696,7 @@ def config(settings):
                     names = ", ".join(names)
                     return names
                 table.roles = s3_fieldmethod("roles", roles)
-                
+
                 list_fields = ["person_id",
                                (T("Roles"), "roles"),
                                (T("Email"), "email.value"),
@@ -3621,8 +3721,8 @@ def config(settings):
             if controller == "vol":
                 if arcs:
                     # ARCS have a custom Volunteer form
-                    from gluon import IS_EMPTY_OR
-                    #from s3 import IS_ADD_PERSON_WIDGET2, IS_ONE_OF, S3LocationSelector, S3SQLCustomForm, S3SQLInlineComponent
+                    #from gluon import IS_EMPTY_OR
+                    #from s3 import S3AddPersonWidget, IS_ONE_OF, S3LocationSelector, S3SQLCustomForm, S3SQLInlineComponent
                     from s3 import IS_ONE_OF, S3LocationSelector, S3SQLCustomForm, S3SQLInlineComponent
 
                     # Go back to Create form after submission
@@ -3632,7 +3732,9 @@ def config(settings):
                     settings.pr.request_email = False
                     #settings.pr.request_year_of_birth = True
                     settings.pr.separate_name_fields = 2
-                    #table.person_id.requires = IS_ADD_PERSON_WIDGET2(first_name_only = True)
+                    #table.person_id.widget = S3AddPersonWidget(controller = "vol",
+                    #                                           first_name_only = True,
+                    #                                           )
                     table.code.label = T("Volunteer ID")
                     ptable = s3db.pr_person
                     ptable.first_name.label = T("Name")
@@ -3835,7 +3937,7 @@ def config(settings):
                     filter_widgets = [S3TextFilter(["person_id$first_name",
                                                     "person_id$middle_name",
                                                     "person_id$last_name",
-                                                    "organisation_id",
+                                                    #"organisation_id",
                                                     ],
                                                    label = T("Search"),
                                                    ),
@@ -4716,14 +4818,39 @@ def config(settings):
             - exclude Observers
         """
 
+        from gluon import redirect, A, URL
+
         training_event_id = r.id
 
-        hrm_notify_participants(training_event_id)
+        success, errors = hrm_notify_participants(training_event_id)
 
-        # Notify the user of success & redirect to main event page
-        current.session.confirmation = current.T("Notifications sent!")
+        if errors:
+            from s3 import s3_str
+            bad = ""
+            for e in errors:
+                error = errors[e]
+                #new_error = "%s: %s" % (A("%s %s" % (error["first_name"],
+                #                                     error["last_name"]),
+                #                          _href=URL(c="hrm", f="person", args=e)),
+                #                        error["error"])
+                new_error = A("%s %s" % (error["first_name"],
+                                         error["last_name"]),
+                              _href=URL(c="hrm", f="person", args=e))
+                if bad:
+                    bad = "%s, %s" % (bad, new_error)
+                else:
+                    bad = new_error
+            current.session.warning = "%s: %s" % (s3_str(T("%i Notifications sent, but these participants couldn't be notified as User Accounts already exist with these email addresses")) % success,
+                                                  bad
+                                                  )
+        elif success:
+            from s3 import s3_str
+            current.session.confirmation = s3_str(T("%i Notifications sent!")) % success
 
-        from gluon import redirect, URL
+        else:
+            current.session.information = T("No Notifications needed sending!")
+
+        # Redirect to main event page
         redirect(URL(args=[training_event_id]))
 
     # -------------------------------------------------------------------------
@@ -4759,6 +4886,11 @@ def config(settings):
             attr["csv_template"] = "hide"
         else:
             auth = current.auth
+
+            s3db.set_method("hrm", "training_event",
+                            method = "notify",
+                            action = hrm_training_event_notify)
+
             if not auth.s3_has_role("ADMIN"):
                 OM = auth.s3_has_role("EVENT_OFFICE_MANAGER")
                 if OM or auth.s3_has_roles(("EVENT_MONITOR", "EVENT_ORGANISER")):
@@ -4768,10 +4900,6 @@ def config(settings):
                     from s3 import FS
 
                     db = current.db
-
-                    s3db.set_method("hrm", "training_event",
-                                    method = "notify",
-                                    action = hrm_training_event_notify)
 
                     organisation_id = auth.user.organisation_id
 
@@ -4785,7 +4913,7 @@ def config(settings):
                     rows = db(query).select(mtable.user_id)
                     user_ids = [row.user_id for row in rows]
                     filter = FS("~.created_by").belongs(set(user_ids))
-                    
+
                     # & those from this region's countries? No!
                     #ltable = s3db.org_organisation_organisation
                     #root_orgs = db(ltable.parent_id == auth.user.organisation_id).select(ltable.organisation_id)
@@ -4806,7 +4934,6 @@ def config(settings):
             if root_org == NRCS and r.component_name == "participant":
                 # Don't allow creating of Persons here
                 from gluon import DIV
-                T = current.T
                 s3db.hrm_training.person_id.comment = \
                     DIV(_class="tooltip",
                         _title="%s|%s" % (T("Participant"),
@@ -4814,10 +4941,9 @@ def config(settings):
 
             elif EVENTS:
                 if not r.component:
-                    T = current.T
                     if OM:
                         # Dashboard for Office Manager
-                        from dateutil.relativedelta import relativedelta
+                        #from dateutil.relativedelta import relativedelta
                         from s3 import S3DateTime, s3_auth_user_represent_name, s3_fieldmethod
 
                         etable = s3db.hrm_training_event
@@ -4943,7 +5069,7 @@ def config(settings):
                                                                     label = T("Programme"),
                                                                     multiple = False,
                                                                     ),
-                                                                
+
                                                     S3SQLInlineLink("project",
                                                                     field = "project_id",
                                                                     label = T("Project"),
@@ -4982,7 +5108,7 @@ def config(settings):
                     s3db.hrm_training.person_id.represent = s3db.pr_PersonRepresent(show_link=True)
                     s3db.configure("hrm_training",
                                    list_fields = ["person_id",
-                                                  (current.T("Job Title"), "job_title"),                    # Field.Method
+                                                  (T("Job Title"), "job_title"),                    # Field.Method
                                                   (settings.get_hrm_organisation_label(), "organisation"),  # Field.Method
                                                   ],
                                    )
@@ -4997,7 +5123,7 @@ def config(settings):
     # -------------------------------------------------------------------------
     def hrm_training_event_onaccept(form):
         """
-            Create a Schduled Task to notify EO / MFP to run survey
+            Create a Scheduled Task to notify EO / MFP to run survey
         """
 
         form_vars = form.vars
@@ -5008,15 +5134,18 @@ def config(settings):
             # Nothing we can do
             return
 
+        db = current.db
+        s3db = current.s3db
+
         start_date = form_vars.get("start_date")
         end_date = form_vars.get("end_date")
         if not start_date or not end_date:
             # Read the record
-            etable = current.s3db.hrm_training_event
-            event = current.db(etable.id == training_event_id).select(etable.start_date,
-                                                                      etable.end_date,
-                                                                      limitby = (0, 1)
-                                                                      ).first()
+            etable = s3db.hrm_training_event
+            event = db(etable.id == training_event_id).select(etable.start_date,
+                                                              etable.end_date,
+                                                              limitby = (0, 1)
+                                                              ).first()
             start_date = event.start_date
             end_date = event.end_date
 
@@ -5027,28 +5156,53 @@ def config(settings):
             # No date defined, so exit
             return
 
+        import json
         from dateutil.relativedelta import relativedelta
+        ttable = s3db.scheduler_task
         schedule_task = current.s3task.schedule_task
+        task_name = "hrm_training_event_survey"
 
-        # Send a 3 month reminder
+        # 3 month reminder
         start_time = end_date + relativedelta(months = 3)
-        schedule_task("hrm_training_event_survey",
-                      args = [training_event_id, 3],
-                      start_time = start_time,
-                      #period = 300,  # seconds
-                      timeout = 300, # seconds
-                      repeats = 1    # run once
-                      )
+        args = [training_event_id, 3]
+        query = (ttable.task_name == task_name) & \
+                (ttable.args == json.dumps(args))
+        exists = db(query).select(ttable.id,
+                                  ttable.start_time,
+                                  limitby = (0, 1)
+                                  ).first()
+        if exists:
+            if exists.start_time != start_time:
+                exists.update_record(start_time = start_time)
+        else:
+            schedule_task(task_name,
+                          args = args,
+                          start_time = start_time,
+                          #period = 300,  # seconds
+                          timeout = 300, # seconds
+                          repeats = 1    # run once
+                          )
 
-        # Send a 12 month reminder
+        # 12 month reminder
         start_time = end_date + relativedelta(months = 12)
-        schedule_task("hrm_training_event_survey",
-                      args = [training_event_id, 12],
-                      start_time = start_time,
-                      #period = 300,  # seconds
-                      timeout = 300, # seconds
-                      repeats = 1    # run once
-                      )
+        args = [training_event_id, 12]
+        query = (ttable.task_name == task_name) & \
+                (ttable.args == json.dumps(args))
+        exists = db(query).select(ttable.id,
+                                  ttable.start_time,
+                                  limitby = (0, 1)
+                                  ).first()
+        if exists:
+            if exists.start_time != start_time:
+                exists.update_record(start_time = start_time)
+        else:
+            schedule_task(task_name,
+                          args = args,
+                          start_time = start_time,
+                          #period = 300,  # seconds
+                          timeout = 300, # seconds
+                          repeats = 1    # run once
+                          )
 
     # -------------------------------------------------------------------------
     def customise_hrm_training_event_resource(r, tablename):
@@ -5153,8 +5307,6 @@ def config(settings):
             Simplified variant of the original function in s3db/member.py,
             with just "paid"/"unpaid"/"exempted" as possible values
         """
-
-        T = current.T
 
         if hasattr(row, "member_membership"):
             row = row.member_membership
@@ -5827,7 +5979,6 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_pr_person_availability_resource(r, tablename):
 
-        T = current.T
         s3db = current.s3db
 
         # Construct slot options
@@ -5947,7 +6098,6 @@ def config(settings):
 
             @ToDo: This should be based on the HRM record, not Person record
                    - could be active with Org1 but not with Org2
-            @ToDo: allow to be calculated differently per-Org
         """
 
         now = current.request.utcnow
@@ -6025,8 +6175,6 @@ def config(settings):
 
         from s3 import S3FixedOptionsWidget, S3SQLCustomForm
 
-        T = current.T
-
         ptewidget = S3FixedOptionsWidget(("Primary",
                                           "Intermediate",
                                           "Advanced",
@@ -6071,6 +6219,8 @@ def config(settings):
         s3db = current.s3db
         s3 = current.response.s3
         request = current.request
+        # Enable scalability-optimized strategies
+        settings.base.bigtable = True
 
         # Special cases for different NS / Roles
         arcs = crmada = ircs = vnrc = False
@@ -7043,7 +7193,7 @@ def config(settings):
             if script not in s3.scripts:
                 s3.scripts.append(script)
             if record and record.followup:
-                s3.jquery_ready.append('''$.showHouseholdComponents(true)''');
+                s3.jquery_ready.append('''$.showHouseholdComponents(true)''')
         return
 
     # -------------------------------------------------------------------------
@@ -7221,7 +7371,7 @@ def config(settings):
         from s3 import s3_set_default_filter
         s3_set_default_filter("~.organisation_id",
                               user_org_root_default_filter,
-                              tablename = "project_project")
+                              tablename = tablename)
 
         # Load standard model
         s3db = current.s3db

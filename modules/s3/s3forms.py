@@ -2,7 +2,7 @@
 
 """ S3 SQL Forms
 
-    @copyright: 2012-2017 (c) Sahana Software Foundation
+    @copyright: 2012-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -51,7 +51,7 @@ from gluon.tools import callback
 from gluon.validators import Validator
 
 from s3query import FS
-from s3utils import s3_debug, s3_mark_required, s3_represent_value, s3_store_last_record_id, s3_unicode, s3_validate
+from s3utils import s3_mark_required, s3_represent_value, s3_store_last_record_id, s3_str, s3_validate
 from s3widgets import S3Selector, S3UploadWidget
 
 # Compact JSON encoding
@@ -587,11 +587,26 @@ class S3SQLDefaultForm(S3SQLForm):
             pkey = table._id.name
             post_vars = request.post_vars
             if not post_vars[pkey]:
+
                 lkey = linked.lkey
                 rkey = linked.rkey
-                _lkey = post_vars[lkey]
-                _rkey = post_vars[rkey]
-                query = (table[lkey] == _lkey) & (table[rkey] == _rkey)
+
+                def parse_key(value):
+                    key = s3_str(value)
+                    if key.startswith("{"):
+                        # JSON-based selector (e.g. S3LocationSelector)
+                        return json.loads(key).get("id")
+                    else:
+                        # Normal selector (e.g. OptionsWidget)
+                        return value
+
+                try:
+                    lkey_ = parse_key(post_vars[lkey])
+                    rkey_ = parse_key(post_vars[rkey])
+                except Exception:
+                    return record_id
+
+                query = (table[lkey] == lkey_) & (table[rkey] == rkey_)
                 row = current.db(query).select(table._id, limitby=(0, 1)).first()
                 if row is not None:
                     tablename = self.tablename
@@ -2264,7 +2279,7 @@ class S3SQLVerticalSubFormLayout(S3SQLSubFormLayout):
         headers = super(S3SQLVerticalSubFormLayout, self).headers
 
         header_row = headers(data, readonly = readonly)
-        element = header_row.element('tr');
+        element = header_row.element('tr')
         if hasattr(element, "remove_class"):
             element.remove_class("static")
         return header_row
@@ -2499,7 +2514,8 @@ class S3SQLInlineComponent(S3SQLSubForm):
                     rfields.append(rfield)
 
             headers = [{"name": rfield.fname,
-                        "label": s3_unicode(rfield.label)}
+                        "label": s3_str(rfield.label),
+                        }
                         for rfield in rfields if rfield.fname != pkey]
 
             self.widgets = widgets
@@ -2536,7 +2552,7 @@ class S3SQLInlineComponent(S3SQLSubForm):
                         # Virtual Field
                         value = row[colname]
 
-                    text = s3_unicode(record[colname])
+                    text = s3_str(record[colname])
                     # Text representation is only used in read-forms where
                     # representation markup cannot interfere with the inline
                     # form logic - so stripping the markup should not be
@@ -3112,7 +3128,7 @@ class S3SQLInlineComponent(S3SQLSubForm):
                                 if person:
                                     values["pe_id"] = person.pe_id
                                 else:
-                                    s3_debug("S3Forms", "Cannot find person with ID: %s" % master[pkey])
+                                    current.log.debug("S3Forms: Cannot find person with ID: %s" % master[pkey])
                             elif resource.tablename == "pr_person" and \
                                  fkey == "case_id" and pkey == "id":
                                 # Using dvr_case as a link between pr_person & e.g. project_activity
@@ -3125,7 +3141,7 @@ class S3SQLInlineComponent(S3SQLSubForm):
                                 if link_record:
                                     values[fkey] = link_record[pkey]
                                 else:
-                                    s3_debug("S3Forms", "Cannot find case for person ID: %s" % master[pkey])
+                                    current.log.debug("S3Forms: Cannot find case for person ID: %s" % master[pkey])
 
                             else:
                                 values[fkey] = master[pkey]
@@ -3135,7 +3151,7 @@ class S3SQLInlineComponent(S3SQLSubForm):
                     try:
                         record_id = component._table.insert(**values)
                     except:
-                        s3_debug("S3Forms", "Cannot insert values %s into table: %s" % (values, component._table))
+                        current.log.debug("S3Forms: Cannot insert values %s into table: %s" % (values, component._table))
                         raise
 
                     # Post-process create
@@ -3890,8 +3906,10 @@ class S3SQLInlineLink(S3SQLInlineComponent):
                 if fname in component.fields:
                     lookup_field = fname
                     break
+            from s3fields import S3Represent
             represent = S3Represent(lookup = component.tablename,
-                                    field = lookup_field)
+                                    fields = [lookup_field],
+                                    )
 
         # Represent all values
         if isinstance(value, (list, tuple, set)):
@@ -4111,9 +4129,10 @@ class S3SQLInlineComponentCheckbox(S3SQLInlineComponent):
                             text = s3_represent_value(field,
                                                       value = value,
                                                       strip_markup = True,
-                                                      xml_escape = True)
+                                                      xml_escape = True,
+                                                      )
                         except:
-                            text = s3_unicode(value)
+                            text = s3_str(value)
                     else:
                         value = None
                         text = ""
@@ -4293,7 +4312,7 @@ class S3SQLInlineComponentCheckbox(S3SQLInlineComponent):
                     # e.g. Project Community Activity Types filtered by Sector of parent Project
                     lookupkey = opt_filter.get("lookupkey", None)
                     if not lookupkey:
-                        raise
+                        raise SyntaxError("lookupkey is required")
                     if resource._rows:
                         _id = resource._rows[0][lookupkey]
                         _resource = s3db.resource(lookuptable, id=_id)
@@ -4603,7 +4622,7 @@ class S3SQLInlineComponentMultiSelectWidget(S3SQLInlineComponentCheckbox):
             elif header is False:
                 header = '''header:false'''
             else:
-                header = '''header:"%s"''' % self.header
+                header = '''header:"%s"''' % header
             script = '''$('#%s').multiselect({selectedText:'%s',%s,height:300,minWidth:0,selectedList:%s,noneSelectedText:'%s'})''' % \
                 (field_name,
                  T("# selected"),

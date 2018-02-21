@@ -2,7 +2,7 @@
 
 """ Sahana Eden Assets Model
 
-    @copyright: 2009-2017 (c) Sahana Software Foundation
+    @copyright: 2009-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -109,6 +109,7 @@ class S3AssetModel(S3Model):
         messages = current.messages
         NONE = messages["NONE"]
         UNKNOWN_OPT = messages.UNKNOWN_OPT
+        YES = T("Yes")
 
         settings = current.deployment_settings
         org_site_label = settings.get_org_site_label()
@@ -155,7 +156,7 @@ class S3AssetModel(S3Model):
                      # Instances
                      super_link("track_id", "sit_trackable"),
                      super_link("doc_id", "doc_entity"),
-                     item_entity_id,
+                     item_entity_id(),
                      Field("number",
                            label = T("Asset Number"),
                            ),
@@ -181,8 +182,7 @@ class S3AssetModel(S3Model):
                      Field("kit", "boolean",
                            default = False,
                            label = T("Kit?"),
-                           represent = lambda opt: \
-                                       (opt and [T("Yes")] or [NONE])[0],
+                           represent = lambda opt: YES if opt else NONE,
                            # @ToDo: deployment_setting
                            readable = False,
                            writable = False,
@@ -388,6 +388,10 @@ class S3AssetModel(S3Model):
 
         # Resource Configuration
         configure(tablename,
+                  context = {"incident": "incident.id",
+                             "location": "location_id",
+                             "organisation": "organisation_id",
+                             },
                   # Open Tabs after creation
                   create_next = URL(c="asset", f="asset",
                                     args=["[id]"]),
@@ -417,6 +421,11 @@ class S3AssetModel(S3Model):
                        asset_human_resource = "asset_id",
                        asset_telephone = "asset_id",
                        asset_telephone_usage = "asset_id",
+                       event_incident = {"link": "event_asset",
+                                         "joinby": "asset_id",
+                                         "key": "incident_id",
+                                         "actuate": "hide",
+                                         },
                        hrm_human_resource = {"link": "asset_human_resource",
                                              "joinby": "asset_id",
                                              "key": "human_resource_id",
@@ -434,7 +443,7 @@ class S3AssetModel(S3Model):
         #
         tablename = "asset_item"
         define_table(tablename,
-                     item_entity_id,
+                     item_entity_id(),
                      asset_id(ondelete = "CASCADE"),
                      item_id(represent = supply_item_represent,
                              requires = IS_ONE_OF(asset_items_set,

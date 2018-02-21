@@ -2,7 +2,7 @@
 
 """ Sahana Eden GIS Model
 
-    @copyright: 2009-2017 (c) Sahana Software Foundation
+    @copyright: 2009-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -58,7 +58,6 @@ from gluon.storage import Storage
 
 from ..s3 import *
 from s3layouts import S3PopupLink
-from s3.s3widgets import set_match_strings
 
 # Compact JSON encoding
 SEPARATORS = (",", ":")
@@ -319,11 +318,6 @@ class S3LocationModel(S3Model):
                                       sortby = "name",
                                       widget = S3LocationSelector(show_address = True,
                                                                   ),
-                                      # Alternate LocationSelector for when you don't have the Location Hierarchy available to load
-                                      #requires = IS_EMPTY_OR(
-                                      #              IS_LOCATION_SELECTOR()
-                                      #              ),
-                                      #widget = S3LocationSelectorWidget(),
                                       # Alternate simple Autocomplete (e.g. used by pr_person_presence)
                                       #requires = IS_EMPTY_OR(IS_LOCATION()),
                                       #widget = S3LocationAutocompleteWidget(),
@@ -971,6 +965,7 @@ class S3LocationModel(S3Model):
         loc_select = _vars.get("loc_select", None)
         if loc_select:
             # S3LocationSelectorWidget
+            # @todo: obsolete?
             fields = ["id",
                       "name",
                       ]
@@ -1026,6 +1021,7 @@ class S3LocationModel(S3Model):
         if field2:
             # S3LocationSelectorWidget's s3_gis_autocomplete_search
             # addr_street
+            # @todo: obsolete?
             fieldname = str.lower(field2)
             fields.append(fieldname)
             query |= FS(fieldname).lower().like(value + "%")
@@ -1048,6 +1044,7 @@ class S3LocationModel(S3Model):
                 query = (table.level.belongs(level))
             elif level == "NULLNONE":
                 # S3LocationSelectorWidget's s3_gis_autocomplete_search
+                # @todo: obsolete?
                 query = (table.level == None)
             elif level == "NOTNONE":
                 # Vulnerability Search
@@ -1212,12 +1209,12 @@ class S3LocationModel(S3Model):
                         # Insert other possible names, if matched
                         _alternate["name"] = name
                         # Populate match information
-                        set_match_strings(_alternate, value)
+                        s3_set_match_strings(_alternate, value)
                         iappend(_alternate)
 
                 if item["name"][:l].lower() == value:
                     # Include Actual name also, if matched
-                    set_match_strings(item, value)
+                    s3_set_match_strings(item, value)
                     iappend(item)
 
             output = json.dumps(items, separators=SEPARATORS)
@@ -3098,7 +3095,7 @@ class S3MapModel(S3Model):
         request = current.request
         folder = request.folder
 
-        layer_id = self.super_link("layer_id", "gis_layer_entity")
+        layer_id = lambda: self.super_link("layer_id", "gis_layer_entity")
         marker_id = self.gis_marker_id
         projection_id = self.gis_projection_id
 
@@ -3194,7 +3191,7 @@ class S3MapModel(S3Model):
 
         tablename = "gis_layer_arcrest"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("url",
@@ -3242,7 +3239,7 @@ class S3MapModel(S3Model):
 
         tablename = "gis_layer_bing"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("type", length=16,
@@ -3263,7 +3260,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_coordinate"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      s3_role_required(),       # Single Role
@@ -3280,7 +3277,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_empty"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      s3_role_required(),       # Single Role
@@ -3297,7 +3294,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_geojson"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("url",
@@ -3347,7 +3344,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_georss"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("url",
@@ -3391,7 +3388,7 @@ class S3MapModel(S3Model):
 
         tablename = "gis_layer_google"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("type", length=16,
@@ -3412,7 +3409,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_gpx"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("track", "upload",
@@ -3461,7 +3458,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_js"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("code", "text",
@@ -3482,7 +3479,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_kml"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("url",
@@ -3541,7 +3538,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_mgrs"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("url",
@@ -3568,7 +3565,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_openstreetmap"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("url1",
@@ -3616,7 +3613,7 @@ class S3MapModel(S3Model):
 
         tablename = "gis_layer_openweathermap"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("type", length=16,
@@ -3639,7 +3636,7 @@ class S3MapModel(S3Model):
 
         tablename = "gis_layer_shapefile"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      source_name_field()(),
@@ -3708,7 +3705,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_tms"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("url",
@@ -3753,7 +3750,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_wfs"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      source_name_field()(),
@@ -3848,7 +3845,7 @@ class S3MapModel(S3Model):
 
         tablename = "gis_layer_wms"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      source_name_field()(),
@@ -3970,7 +3967,7 @@ class S3MapModel(S3Model):
         #
         tablename = "gis_layer_xyz"
         define_table(tablename,
-                     layer_id,
+                     layer_id(),
                      name_field()(),
                      desc_field()(),
                      Field("url",

@@ -2,7 +2,7 @@
 
 """ Sahana Eden Project Model
 
-    @copyright: 2011-2017 (c) Sahana Software Foundation
+    @copyright: 2011-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -1109,8 +1109,7 @@ class S3ProjectActivityModel(S3Model):
                      # Beneficiary could be a person_id
                      # Either way label should be clear
                      self.pr_person_id(label = T("Contact Person"),
-                                       requires = IS_ADD_PERSON_WIDGET2(allow_empty=True),
-                                       widget = S3AddPersonWidget2(controller="pr"),
+                                       widget = S3AddPersonWidget(controller="pr"),
                                        ),
                      Field("time_estimated", "double",
                            label = "%s (%s)" % (T("Time Estimate"),
@@ -1464,7 +1463,7 @@ class S3ProjectActivityModel(S3Model):
         tablename = "project_activity_activity_type"
         define_table(tablename,
                      activity_id(empty = False,
-                                 ondelete = "CASCADE",
+                                 #ondelete = "CASCADE",
                                  ),
                      self.project_activity_type_id(empty = False,
                                                    ondelete = "CASCADE",
@@ -1814,7 +1813,8 @@ class S3ProjectActivityPersonModel(S3Model):
         tablename = "project_activity_person"
         self.define_table(tablename,
                           self.project_activity_id(empty = False,
-                                                   ondelete = "CASCADE",
+                                                   # Default:
+                                                   #ondelete = "CASCADE",
                                                    ),
                           #self.dvr_case_id(empty = False,
                           #                 ondelete = "CASCADE",
@@ -1883,7 +1883,8 @@ class S3ProjectActivityOrganisationModel(S3Model):
         tablename = "project_activity_organisation"
         define_table(tablename,
                      project_activity_id(empty = False,
-                                         ondelete = "CASCADE",
+                                         # Default:
+                                         #ondelete = "CASCADE",
                                          ),
                      self.org_organisation_id(empty = False,
                                               ondelete = "CASCADE",
@@ -1916,7 +1917,8 @@ class S3ProjectActivityOrganisationModel(S3Model):
         tablename = "project_activity_group"
         define_table(tablename,
                      project_activity_id(empty = False,
-                                         ondelete = "CASCADE",
+                                         # Default:
+                                         #ondelete = "CASCADE",
                                          ),
                      self.org_group_id(empty = False,
                                        ondelete = "CASCADE",
@@ -1956,7 +1958,8 @@ class S3ProjectActivitySectorModel(S3Model):
                                              ondelete = "CASCADE",
                                              ),
                           self.project_activity_id(empty = False,
-                                                   ondelete = "CASCADE",
+                                                   # Default:
+                                                   #ondelete = "CASCADE",
                                                    ),
                           *s3_meta_fields())
 
@@ -2375,7 +2378,8 @@ class S3ProjectBeneficiaryModel(S3Model):
         tablename = "project_beneficiary_activity"
         define_table(tablename,
                      self.project_activity_id(empty = False,
-                                              ondelete = "CASCADE",
+                                              # Default:
+                                              #ondelete = "CASCADE",
                                               ),
                      beneficiary_id(empty = False,
                                     ondelete = "CASCADE",
@@ -3635,11 +3639,10 @@ class S3ProjectLocationModel(S3Model):
         tablename = "project_location_contact"
         define_table(tablename,
                      project_location_id(),
-                     self.pr_person_id(
-                        comment = None,
-                        requires = IS_ADD_PERSON_WIDGET2(),
-                        widget = S3AddPersonWidget2(controller="pr"),
-                        ),
+                     self.pr_person_id(comment = None,
+                                       widget = S3AddPersonWidget(controller="pr"),
+                                       empty = False,
+                                       ),
                      *s3_meta_fields())
 
         # CRUD Strings
@@ -4870,8 +4873,10 @@ class S3ProjectPlanningModel(S3Model):
         #
         tablename = "project_indicator_activity_activity"
         define_table(tablename,
-                     indicator_activity_id(),
+                     indicator_activity_id(ondelete = "CASCADE"),
                      self.project_activity_id(empty = False,
+                                              # Default:
+                                              #ondelete = "CASCADE",
                                               ),
                      *s3_meta_fields())
 
@@ -6478,7 +6483,7 @@ class S3ProjectPlanningModel(S3Model):
                 project_id = indicator.project_id
                 atable = s3db.project_activity
                 db(atable.id == link.activity_id).update(project_id = project_id)
-                
+
                 if current.deployment_settings.get_project_status_from_activities():
                     # Update Statuses or else only this record's weighting is taken into account
                     self.project_planning_status_update(project_id)
@@ -7234,7 +7239,45 @@ class project_SummaryReport(S3Method):
                 else:
                     actual_progress = 0
                     planned_progress = 0
-                if indicator_id in goals[goal_id]["outcomes"][outcome_id]["outputs"][output_id]["indicators"]:
+                if goal_id not in goals:
+                    goals[goal_id] = {"actual_progress": 0,
+                                      "planned_progress": 0,
+                                      "outcomes": {outcome_id: {"outputs": {output_id: {"indicators": {indicator_id: {"activities": {},
+                                                                                                                      "code": row.code,
+                                                                                                                      "name": indicator_name,
+                                                                                                                      "actual_progress": actual_progress,
+                                                                                                                      "planned_progress": planned_progress,
+                                                                                                                      }
+                                                                                                       }
+                                                                                        }
+                                                                            }
+                                                                }
+                                                   }
+                                      }
+
+                elif outcome_id not in goals[goal_id]["outcomes"]:
+                    goals[goal_id]["outcomes"][outcome_id] = {"outputs": {output_id: {"indicators": {indicator_id: {"activities": {},
+                                                                                                                    "code": row.code,
+                                                                                                                    "name": indicator_name,
+                                                                                                                    "actual_progress": actual_progress,
+                                                                                                                    "planned_progress": planned_progress,
+                                                                                                                    }
+                                                                                                     }
+                                                                                      }
+                                                                          }
+                                                              }
+
+                elif output_id not in goals[goal_id]["outcomes"][outcome_id]["outputs"]:
+                    goals[goal_id]["outcomes"][outcome_id]["outputs"][output_id] = {"indicators": {indicator_id: {"activities": {},
+                                                                                                                  "code": row.code,
+                                                                                                                  "name": indicator_name,
+                                                                                                                  "actual_progress": actual_progress,
+                                                                                                                  "planned_progress": planned_progress,
+                                                                                                                  }
+                                                                                                   }
+                                                                                    }
+
+                elif indicator_id in goals[goal_id]["outcomes"][outcome_id]["outputs"][output_id]["indicators"]:
                     goals[goal_id]["outcomes"][outcome_id]["outputs"][output_id]["indicators"][indicator_id].update(code = row.code,
                                                                                                                     name = indicator_name,
                                                                                                                     actual_progress = actual_progress,
@@ -7291,7 +7334,31 @@ class project_SummaryReport(S3Method):
                 else:
                     actual_progress = 0
                     planned_progress = 0
-                if output_id in goals[goal_id]["outcomes"][outcome_id]["outputs"]:
+                if goal_id not in goals:
+                    goals[goal_id] = {"actual_progress": 0,
+                                      "planned_progress": 0,
+                                      "outcomes": {outcome_id: {"outputs": {output_id: {"indicators": {},
+                                                                                        "code": row.code,
+                                                                                        "name": output_name,
+                                                                                        "actual_progress": actual_progress,
+                                                                                        "planned_progress": planned_progress,
+                                                                                        }
+                                                                            }
+                                                                }
+                                                   }
+                                      }
+
+                elif outcome_id not in goals[goal_id]["outcomes"]:
+                    goals[goal_id]["outcomes"][outcome_id] = {"outputs": {output_id: {"indicators": {},
+                                                                                      "code": row.code,
+                                                                                      "name": output_name,
+                                                                                      "actual_progress": actual_progress,
+                                                                                      "planned_progress": planned_progress,
+                                                                                      }
+                                                                          }
+                                                              }
+
+                elif output_id in goals[goal_id]["outcomes"][outcome_id]["outputs"]:
                     goals[goal_id]["outcomes"][outcome_id]["outputs"][output_id].update(code = row.code,
                                                                                         name = output_name,
                                                                                         actual_progress = actual_progress,
@@ -7309,8 +7376,8 @@ class project_SummaryReport(S3Method):
                 planned_progress = planned_progress * weighting
                 if outcome_id not in outcomes:
                     outcomes[outcome_id] = {"actual_progress": actual_progress,
-                                          "planned_progress": planned_progress,
-                                          }
+                                            "planned_progress": planned_progress,
+                                            }
                 else:
                     # Add this data to Totals
                     o = outcomes[outcome_id]
@@ -7346,7 +7413,18 @@ class project_SummaryReport(S3Method):
                 else:
                     actual_progress = 0
                     planned_progress = 0
-                if outcome_id in goals[goal_id]["outcomes"]:
+                if goal_id not in goals:
+                    goals[goal_id] = {"actual_progress": 0,
+                                      "planned_progress": 0,
+                                      "outcomes": {"outputs": {},
+                                                   "code": row.code,
+                                                   "name": outcome_name,
+                                                   "actual_progress": actual_progress,
+                                                   "planned_progress": planned_progress,
+                                                   }
+                                      }
+
+                elif outcome_id in goals[goal_id]["outcomes"]:
                     goals[goal_id]["outcomes"][outcome_id].update(code = row.code,
                                                                   name = outcome_name,
                                                                   actual_progress = actual_progress,
@@ -7397,12 +7475,10 @@ class project_SummaryReport(S3Method):
                 goal_id = row.id
                 goal_name = row.name
                 if goal_id in goals:
-                    actual_progress = outcomes[goal_id]["actual_progress"]
-                    planned_progress = outcomes[goal_id]["planned_progress"]
                     goals[goal_id].update(code = row.code,
                                           name = goal_name,
-                                          actual_progress = actual_progress,
-                                          planned_progress = planned_progress,
+                                          #actual_progress = actual_progress,
+                                          #planned_progress = planned_progress,
                                           )
                 else:
                     actual_progress = 0
@@ -9738,6 +9814,18 @@ class S3ProjectStrategyModel(S3Model):
         return dict(project_strategy_id = strategy_id,
                     )
 
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def defaults():
+        """ Safe defaults for model-global names if module is disabled """
+
+        dummy = S3ReusableField("dummy_id", "integer",
+                                readable = False,
+                                writable = False)
+
+        return dict(project_strategy_id = lambda **attr: dummy("strategy_id"),
+                    )
+
 # =============================================================================
 class S3ProjectThemeModel(S3Model):
     """
@@ -10346,6 +10434,7 @@ class S3ProjectTaskModel(S3Model):
         project_id = self.project_project_id
 
         messages = current.messages
+        NONE = messages["NONE"]
         UNKNOWN_OPT = messages.UNKNOWN_OPT
 
         add_components = self.add_components
@@ -10495,7 +10584,7 @@ class S3ProjectTaskModel(S3Model):
                                          _title="%s|%s" % (T("Detailed Description/URL"),
                                                            T("Please provide as much detail as you can, including the URL(s) where the bug occurs or you'd like the new feature to go."))),
                            ),
-                     self.org_site_id,
+                     self.org_site_id(),
                      self.gis_location_id(
                             # Can be enabled & labelled within a Template as-required
                             #label = T("Deployment Location"),
@@ -10784,8 +10873,7 @@ class S3ProjectTaskModel(S3Model):
 
         # Resource Configuration
         configure(tablename,
-                  context = {#"event": "event.event_id",
-                             "incident": "incident.incident_id",
+                  context = {"incident": "incident.incident_id",
                              "location": "location_id",
                              # Assignee instead?
                              "organisation": "created_by$organisation_id",
@@ -10867,11 +10955,9 @@ class S3ProjectTaskModel(S3Model):
                        #event_incident = {"link": "event_task",
                        #                  "joinby": "task_id",
                        #                  "key": "incident_id",
-                       #                  "actuate": "embed",
-                       #                  "autocomplete": "name",
-                       #                  "autodelete": False,
+                       #                  "actuate": "replace",
                        #                  },
-                       # Format for InlineComponent
+                       # Format for InlineComponent & Context
                        event_task = {"name": "incident",
                                      "joinby": "task_id",
                                      },
@@ -11107,10 +11193,13 @@ class S3ProjectTaskModel(S3Model):
                                  future=0
                                  ),
                      Field("hours", "double",
-                           label = "%s (%s)" % (T("Time"),
-                                                T("hours")),
-                           represent=lambda v: \
-                                     IS_FLOAT_AMOUNT.represent(v, precision=2)),
+                           label = T("Effort (Hours)"),
+                           requires = IS_EMPTY_OR(
+                                       IS_FLOAT_IN_RANGE(0.0, None)),
+                           represent = lambda hours: "%.2f" % hours if hours else NONE,
+                           widget = S3HoursWidget(precision = 2,
+                                                  ),
+                           ),
                      Field.Method("day", project_time_day),
                      Field.Method("week", project_time_week),
                      s3_comments(),
@@ -11334,15 +11423,15 @@ class S3ProjectTaskModel(S3Model):
 
         db = current.db
         s3db = current.s3db
-        session = current.session
+        #session = current.session
 
         task_id = form.vars.id
 
-        if session.s3.incident:
-            # Create a link between this Task & the active Incident
-            etable = s3db.event_task
-            etable.insert(incident_id = session.s3.incident,
-                          task_id = task_id)
+        #if session.s3.incident:
+        #    # Create a link between this Task & the active Incident
+        #    etable = s3db.event_task
+        #    etable.insert(incident_id = session.s3.incident,
+        #                  task_id = task_id)
 
         ltp = db.project_task_project
 
@@ -11408,11 +11497,14 @@ class S3ProjectTaskModel(S3Model):
         if record: # Not True for a record merger
             for var in form_vars:
                 vvar = form_vars[var]
+                if isinstance(vvar, Field):
+                    # modified_by/modified_on
+                    continue
                 rvar = record[var]
                 if vvar != rvar:
-                    type = table[var].type
-                    if type == "integer" or \
-                       type.startswith("reference"):
+                    type_ = table[var].type
+                    if type_ == "integer" or \
+                       type_.startswith("reference"):
                         if vvar:
                             vvar = int(vvar)
                         if vvar == rvar:
@@ -11439,7 +11531,7 @@ class S3ProjectTaskModel(S3Model):
         post_vars = current.request.post_vars
         if "project_id" in post_vars:
             ltable = db.project_task_project
-            filter = (ltable.task_id == task_id)
+            filter_ = (ltable.task_id == task_id)
             project = post_vars.project_id
             if project:
                 # Create the link to the Project
@@ -11458,14 +11550,14 @@ class S3ProjectTaskModel(S3Model):
                     link_id = ltable.insert(task_id = task_id,
                                             project_id = project,
                                             )
-                filter = filter & (ltable.id != link_id)
+                filter_ = filter_ & (ltable.id != link_id)
             # Remove any other links
-            links = s3db.resource("project_task_project", filter=filter)
+            links = s3db.resource("project_task_project", filter=filter_)
             links.delete()
 
         if "activity_id" in post_vars:
             ltable = db.project_task_activity
-            filter = (ltable.task_id == task_id)
+            filter_ = (ltable.task_id == task_id)
             activity = post_vars.activity_id
             if post_vars.activity_id:
                 # Create the link to the Activity
@@ -11484,14 +11576,14 @@ class S3ProjectTaskModel(S3Model):
                     link_id = ltable.insert(task_id = task_id,
                                             activity_id = activity,
                                             )
-                filter = filter & (ltable.id != link_id)
+                filter_ = filter_ & (ltable.id != link_id)
             # Remove any other links
-            links = s3db.resource("project_task_activity", filter=filter)
+            links = s3db.resource("project_task_activity", filter=filter_)
             links.delete()
 
         if "milestone_id" in post_vars:
             ltable = db.project_task_milestone
-            filter = (ltable.task_id == task_id)
+            filter_ = (ltable.task_id == task_id)
             milestone = post_vars.milestone_id
             if milestone:
                 # Create the link to the Milestone
@@ -11510,9 +11602,9 @@ class S3ProjectTaskModel(S3Model):
                     link_id = ltable.insert(task_id = task_id,
                                             milestone_id = milestone,
                                             )
-                filter = filter & (ltable.id != link_id)
+                filter_ = filter_ & (ltable.id != link_id)
             # Remove any other links
-            links = s3db.resource("project_task_milestone", filter=filter)
+            links = s3db.resource("project_task_milestone", filter=filter_)
             links.delete()
 
         # Notify Assignee
@@ -11565,6 +11657,8 @@ class S3ProjectTaskModel(S3Model):
             ltable.insert(task_id = task_id,
                           forum_id = forum_id,
                           )
+            # Update modified_on of the forum to allow subscribers to be notified
+            db(s3db.pr_forum.id == forum_id).update(modified_on = r.utcnow)
 
         output = current.xml.json_message(True, 200, current.T("Task Shared"))
         current.response.headers["Content-Type"] = "application/json"

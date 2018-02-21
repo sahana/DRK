@@ -4,7 +4,7 @@
 
     @requires: U{B{I{gluon}} <http://web2py.com>}
 
-    @copyright: 2009-2017 (c) Sahana Software Foundation
+    @copyright: 2009-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -34,15 +34,11 @@ import sys
 from itertools import chain
 from uuid import uuid4
 
-from gluon import *
-# Here are dependencies listed for reference:
-#from gluon import current
-#from gluon.html import *
-#from gluon.validators import *
+from gluon import current, A, DIV, Field, IS_EMPTY_OR, IS_IN_SET, TAG, URL, XML
 from gluon.storage import Storage
 from gluon.languages import lazyT
 
-from s3dal import Query, SQLCustomType
+from s3dal import SQLCustomType
 from s3datetime import S3DateTime
 from s3navigation import S3ScriptItem
 from s3utils import s3_auth_user_represent, s3_auth_user_represent_name, s3_unicode, s3_str, S3MarkupStripper
@@ -52,10 +48,10 @@ from s3widgets import S3CalendarWidget, S3DateWidget
 # =============================================================================
 class FieldS3(Field):
     """
-        S3 extensions of the gluon.sql.Field clas
+        S3 extensions of the gluon.sql.Field class
+            - add "sortby" attribute (used by IS_ONE_OF)
 
-        If Server Side Pagination is on, the proper CAST is needed to
-        match the lookup table id
+        @todo: add parameters supported by newer PyDAL
     """
 
     def __init__(self, fieldname,
@@ -85,49 +81,27 @@ class FieldS3(Field):
 
         Field.__init__(self,
                        fieldname,
-                       type,
-                       length,
-                       default,
-                       required,
-                       requires,
-                       ondelete,
-                       notnull,
-                       unique,
-                       uploadfield,
-                       widget,
-                       label,
-                       comment,
-                       writable,
-                       readable,
-                       update,
-                       authorize,
-                       autodelete,
-                       represent,
-                       uploadfolder,
-                       compute)
-
-    # -------------------------------------------------------------------------
-    def join_via(self, value):
-        if self.type.find("reference") == 0:
-            return Query(self, "=", value)
-        else:
-            return QueryS3(self, "join_via", value)
-
-# =============================================================================
-class QueryS3(Query):
-    """
-        S3 extensions of the gluon.sql.Query class
-
-        If Server Side Pagination is on, the proper CAST is needed to match
-        the string-typed id to lookup table id
-    """
-
-    def __init__(self, left, op=None, right=None):
-
-        if op != "join_via":
-            Query.__init__(self, left, op, right)
-        else:
-            self.sql = "CAST(TRIM(%s,"|") AS INTEGER)=%s" % (left, right)
+                       type=type,
+                       length=length,
+                       default=default,
+                       required=required,
+                       requires=requires,
+                       ondelete=ondelete,
+                       notnull=notnull,
+                       unique=unique,
+                       uploadfield=uploadfield,
+                       widget=widget,
+                       label=label,
+                       comment=comment,
+                       writable=writable,
+                       readable=readable,
+                       update=update,
+                       authorize=authorize,
+                       autodelete=autodelete,
+                       represent=represent,
+                       uploadfolder=uploadfolder,
+                       compute=compute,
+                       )
 
 # =============================================================================
 def s3_fieldmethod(name, f, represent=None, search_field=None):
@@ -316,6 +290,10 @@ class S3Represent(object):
 
         self.rows = {}
 
+        self.clabels = None
+        self.slabels = None
+        self.htemplate = None
+
         # Attributes to simulate being a function for sqlhtml's represent()
         # Make sure we indicate only 1 position argument
         self.func_code = Storage(co_argcount = 1)
@@ -328,7 +306,7 @@ class S3Represent(object):
             self.custom_lookup = False
 
     # -------------------------------------------------------------------------
-    def _lookup_rows(self, key, values, fields=[]):
+    def _lookup_rows(self, key, values, fields=None):
         """
             Lookup all rows referenced by values.
             (in foreign key representations)
@@ -338,7 +316,10 @@ class S3Represent(object):
             @param fields: the fields to retrieve
         """
 
+        if fields is None:
+            fields = []
         fields.append(key)
+
         if len(values) == 1:
             query = (key == values[0])
         else:
@@ -375,7 +356,7 @@ class S3Represent(object):
             none = self.none
             for k, v in row_dict.items():
                 if v is None:
-                    row_dict[k] = self.none
+                    row_dict[k] = none
 
             v = labels % row_dict
 
@@ -395,7 +376,7 @@ class S3Represent(object):
                     values = [T(v) if not type(v) is lazyT else v for v in values]
                     translated = True
                 sep = self.field_sep
-                v = sep.join([s3_str(v) for v in values])
+                v = sep.join(s3_str(value) for value in values)
             elif values:
                 v = s3_str(values[0])
             else:
@@ -1000,16 +981,15 @@ def s3_deletion_status():
 s3_meta_created_on = S3ReusableField("created_on", "datetime",
                                      readable = False,
                                      writable = False,
-                                     default = lambda: \
-                                        datetime.datetime.utcnow())
+                                     default = datetime.datetime.utcnow,
+                                     )
 
 s3_meta_modified_on = S3ReusableField("modified_on", "datetime",
                                       readable = False,
                                       writable = False,
-                                      default = lambda: \
-                                        datetime.datetime.utcnow(),
-                                      update = lambda: \
-                                        datetime.datetime.utcnow())
+                                      default = datetime.datetime.utcnow,
+                                      update = datetime.datetime.utcnow,
+                                      )
 
 def s3_timestamp():
     return (s3_meta_created_on(),

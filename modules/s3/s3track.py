@@ -2,7 +2,7 @@
 
 """ Simple Generic Location Tracking System
 
-    @copyright: 2011-2017 (c) Sahana Software Foundation
+    @copyright: 2011-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -37,7 +37,8 @@ from gluon.html import *
 from s3dal import Table, Rows, Row
 from s3rest import S3Method
 
-__all__ = ("S3Tracker",
+__all__ = ("S3Trackable",
+           "S3Tracker",
            "S3CheckInMethod",
            "S3CheckOutMethod",
            )

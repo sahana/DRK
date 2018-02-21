@@ -2,7 +2,7 @@
 
 """ Sahana Eden Supply Model
 
-    @copyright: 2009-2017 (c) Sahana Software Foundation
+    @copyright: 2009-2018 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -109,6 +109,7 @@ class S3SupplyModel(S3Model):
         float_represent = IS_FLOAT_AMOUNT.represent
 
         NONE = current.messages["NONE"]
+        YES = T("Yes")
 
         format = auth.permission.format
         if format == "html":
@@ -398,8 +399,7 @@ $.filterOptionsS3({
                      Field("kit", "boolean",
                            default = False,
                            label = T("Kit?"),
-                           represent = lambda opt: \
-                                       (opt and [T("Yes")] or [NONE])[0],
+                           represent = lambda opt: YES if opt else NONE,
                            ),
                      Field("model", length=128,
                            label = T("Model/Type"),
@@ -851,17 +851,17 @@ $.filterOptionsS3({
                           *s3_ownerstamp())
 
         # Reusable Field
-        item_id = super_link("item_entity_id", "supply_item_entity",
-                             #writable = True,
-                             #readable = True,
-                             #label = T("Status"),
-                             #represent = item_represent,
-                             # Comment these to use a Dropdown & not an Autocomplete
-                             #widget = S3ItemAutocompleteWidget(),
-                             #comment = DIV(_class="tooltip",
-                             #              _title="%s|%s" % (T("Item"),
-                             #                                current.messages.AUTOCOMPLETE_HELP))
-                             )
+        item_id = lambda: super_link("item_entity_id", "supply_item_entity",
+                                     #writable = True,
+                                     #readable = True,
+                                     #label = T("Status"),
+                                     #represent = item_represent,
+                                     # Comment these to use a Dropdown & not an Autocomplete
+                                     #widget = S3ItemAutocompleteWidget(),
+                                     #comment = DIV(_class="tooltip",
+                                     #              _title="%s|%s" % (T("Item"),
+                                     #                                current.messages.AUTOCOMPLETE_HELP))
+                                     )
 
         # Filter Widgets
         filter_widgets = [
@@ -919,7 +919,7 @@ $.filterOptionsS3({
                                                   readable=False)
         item_id = S3ReusableField("item_entity_id", "integer",
                                   writable=False,
-                                  readable=False)()
+                                  readable=False)
         item_pack_id = S3ReusableField("item_pack_id", "integer",
                                        writable=False,
                                        readable=False)
@@ -1238,7 +1238,7 @@ class S3SupplyDistributionModel(S3Model):
         tablename = "supply_distribution_item"
         define_table(tablename,
                      super_link("parameter_id", "stats_parameter"),
-                     self.supply_item_entity_id,
+                     self.supply_item_entity_id(),
                      self.supply_item_id(ondelete = "RESTRICT",
                                          required = True,
                                          ),

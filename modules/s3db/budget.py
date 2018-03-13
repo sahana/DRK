@@ -26,7 +26,6 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
     OTHER DEALINGS IN THE SOFTWARE.
 """
-from reportlab.lib.validators import Percentage
 
 __all__ = ("S3BudgetModel",
            "S3BudgetKitModel",
@@ -1685,7 +1684,7 @@ class budget_CostItemRepresent(S3Represent):
         }
 
     # -------------------------------------------------------------------------
-    def lookup_rows(self, key, values, fields=[]):
+    def lookup_rows(self, key, values, fields=None):
         """
             Custom rows lookup function
 

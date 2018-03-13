@@ -2166,8 +2166,9 @@ class S3HRSkillModel(S3Model):
                                    widget = widget
                                    )
 
-        multi_skill_represent = S3Represent(lookup=tablename,
-                                            multiple=True)
+        multi_skill_represent = S3Represent(lookup = tablename,
+                                            multiple = True,
+                                            )
         multi_skill_id = S3ReusableField("skill_id", "list:reference hrm_skill",
                                          label = T("Skills"),
                                          ondelete = "SET NULL",
@@ -2558,7 +2559,8 @@ class S3HRSkillModel(S3Model):
                                   represent
                                   )),
             sortby = "name",
-            comment=S3PopupLink(f = "event_type",
+            comment=S3PopupLink(c = "hrm",
+                                f = "event_type",
                                 label = label_create,
                                 title = label_create,
                                 tooltip = T("Add a new event type to the catalog."),
@@ -4209,9 +4211,8 @@ class S3HRAppraisalModel(S3Model):
                      s3_comments(),
                      *s3_meta_fields())
 
-        ADD_APPRAISAL = T("Add Appraisal")
         current.response.s3.crud_strings[tablename] = Storage(
-            label_create = ADD_APPRAISAL,
+            label_create = T("Add Appraisal"),
             title_display = T("Appraisal Details"),
             title_list = T("Appraisals"),
             title_update = T("Edit Appraisal"),
@@ -5019,7 +5020,12 @@ class hrm_AssignMethod(S3Method):
             @param attr: controller options for this request
         """
 
-        component = r.resource.components[self.component]
+        try:
+            component = r.resource.components[self.component]
+        except KeyError:
+            current.log.error("Invalid Component!")
+            raise
+
         if component.link:
             component = component.link
 

@@ -269,8 +269,11 @@ class S3OrganisationModel(S3Model):
                                                       filterby="parent",
                                                       filter_opts=(None,),
                                                       orderby="org_region.name"))
+                # IFRC: Only show the Regions, not the Zones
+                opts_filter = ("parent", (None,))
             else:
                 hierarchy = None
+                opts_filter = (None, None)
 
             # CRUD strings
             crud_strings[tablename] = Storage(
@@ -293,9 +296,8 @@ class S3OrganisationModel(S3Model):
                             IS_ONE_OF(db, "org_region.id",
                                       region_represent,
                                       sort=True,
-                                      # IFRC: Only show the Regions, not the Zones
-                                      not_filterby="parent",
-                                      not_filter_opts=(None,)
+                                      not_filterby=opts_filter[0],
+                                      not_filter_opts=opts_filter[1],
                                       )),
                 sortby = "name",
                 comment = S3PopupLink(c = "org",
@@ -371,8 +373,9 @@ class S3OrganisationModel(S3Model):
                            label = T("Home Country"),
                            represent = self.gis_country_code_represent,
                            requires = IS_EMPTY_OR(IS_IN_SET_LAZY(
-                                lambda: gis.get_countries(key_type="code"),
-                                                          zero=messages.SELECT_LOCATION)),
+                                        lambda: gis.get_countries(key_type="code"),
+                                        zero = messages.SELECT_LOCATION
+                                        )),
                            ),
                      # Simple free-text contact field, can be enabled
                      # in templates as needed
@@ -415,8 +418,7 @@ class S3OrganisationModel(S3Model):
                            comment = DIV(_class="tooltip",
                                          _title="%s|%s" % (T("Logo"),
                                                            T("Logo of the organization. This should be a png or jpeg file and it should be no larger than 400x400"))),
-                           uploadfolder = os.path.join(
-                                            current.request.folder, "uploads"),
+                           uploadfolder = os.path.join(current.request.folder, "uploads"),
                            ),
                      s3_comments(),
                      #document_id(), # Better to have multiple Documents on a Tab
@@ -3152,7 +3154,7 @@ class S3SiteModel(S3Model):
                                 writable = False,
                                 ),
                           Field("comments", "text"),
-                          *s3_ownerstamp())
+                          *S3MetaFields.owner_meta_fields())
 
         # ---------------------------------------------------------------------
         settings = current.deployment_settings
@@ -4126,7 +4128,7 @@ class S3FacilityModel(S3Model):
             filter_widgets.append(
                 S3OptionsFilter("reqs",
                                 label = T("Highest Priority Open Requests"),
-                                options = self.req_priority_opts,
+                                options = lambda: self.req_priority_opts,
                                 cols = 3,
                                 ))
 
@@ -6587,14 +6589,26 @@ def org_organisation_controller():
                            )
 
         elif r.interactive or r.representation == "aadata":
-            component = r.component
-            gis = current.gis
+
             otable = r.table
+
+            gis = current.gis
             otable.country.default = gis.get_default_country("code")
-            type_filter = r.get_vars.get("organisation_type.name", None)
+
+            f = r.function
+            if settings.get_org_regions() and f != "organisation":
+                # Non-default function name (e.g. project/partners)
+                # => use same function for options lookup after popup-create
+                popup_link = otable.region_id.comment
+                if popup_link and isinstance(popup_link, S3PopupLink):
+                    popup_link.vars["parent"] = f
 
             method = r.method
+            component = r.component
+
             use_branches = settings.get_org_branches()
+            type_filter = r.get_vars.get("organisation_type.name", None)
+
             if use_branches and not component and \
                not r.record and \
                r.method != "deduplicate" and \
@@ -7822,7 +7836,7 @@ class org_AssignMethod(S3Method):
         e.g. Organisation Group
     """
 
-    def __init__(self, component, types=None):
+    def __init__(self, component):
         """
             @param component: the Component in which to create records
         """
@@ -7837,18 +7851,14 @@ class org_AssignMethod(S3Method):
             @param attr: controller options for this request
         """
 
-        component = self.component
-        components = r.resource.components
-        for c in components:
-            if c == component:
-                component = components[c]
-                break
         try:
-            if component.link:
-                component = component.link
-        except:
+            component = r.resource.components[self.component]
+        except KeyError:
             current.log.error("Invalid Component!")
             raise
+
+        if component.link:
+            component = component.link
 
         tablename = component.tablename
 

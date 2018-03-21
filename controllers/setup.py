@@ -9,9 +9,10 @@
 module = request.controller
 
 if not settings.has_module(module):
-    # This is likely to happen after deployment from co-app
-    #raise HTTP(404, body="Module disabled: %s" % module)
-    redirect(URL(c="default", f="index"))
+    raise HTTP(404, body="Module disabled: %s" % module)
+
+if not s3_has_role("ADMIN"):
+        auth.permission.fail()
 
 # -----------------------------------------------------------------------------
 def index():
@@ -25,8 +26,42 @@ def index():
         # Redirect to the list of deployments
         redirect(URL(c="setup", f="deployment"))
     else:
-        # User-friendly index page to step through deploying Eden
-        return {}
+        templates = settings.get_template()
+        if templates != "setup":
+            # Import the current deployment
+            country = None
+            if isinstance(templates, list):
+                for template in templates:
+                    try:
+                        country = template.split("locations.", 1)[1]
+                    except IndexError:
+                        continue
+                    else:
+                        break
+                if country:
+                    templates.remove("locations.%s" % country)
+            deployment_id = s3db.setup_deployment.insert(sender = settings.get_mail_sender(),
+                                                         # @ToDo:
+                                                         #repo_url = ,
+                                                         country = country,
+                                                         template = templates,
+                                                         db_password = settings.database.get("password"),
+                                                         )
+            # @ToDo: Support multi-host deployments
+            s3db.setup_server.insert(deployment_id = deployment_id,
+                                     )
+            task_id = current.s3task.async("dummy")
+            instance_id = s3db.setup_instance.insert(deployment_id = deployment_id,
+                                                     url = settings.get_base_public_url(),
+                                                     task_id = task_id,
+                                                     )
+            s3db.setup_instance_settings_read(instance_id, deployment_id)
+
+            # Redirect to the list of deployments
+            redirect(URL(c="setup", f="deployment"))
+
+    # User-friendly index page to step through deploying Eden
+    return {}
 
 # -----------------------------------------------------------------------------
 def deployment():
@@ -71,8 +106,9 @@ def deployment():
                                                 join = itable.on(itable.task_id == sctable.id)
                                                 )
                         types = {1: "prod",
-                                 2: "test",
-                                 3: "demo",
+                                 2: "setup",
+                                 3: "test",
+                                 4: "demo",
                                  }
                         for row in rows:
                             del types[row.type]

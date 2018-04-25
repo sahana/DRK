@@ -271,6 +271,7 @@ def config(settings):
     # -------------------------------------------------------------------------
     # Organisations Module Settings
     #
+    settings.org.sector = True
     settings.org.branches = True
     settings.org.offices_tab = False
 
@@ -300,9 +301,17 @@ def config(settings):
     settings.dvr.case_activity_use_status = True
     # Case activities cover multiple needs
     settings.dvr.case_activity_needs_multiple = True
+    # Beneficiary documents-tab includes case activity attachments
+    settings.dvr.case_include_activity_docs = True
 
     # Manage individual response actions in case activities
     settings.dvr.manage_response_actions = True
+    # Use response themes
+    settings.dvr.response_themes = True
+    # Response themes are org-specific
+    settings.dvr.response_themes_org_specific = True
+    # Do not use response types
+    settings.dvr.response_types = False
     # Response types hierarchical
     settings.dvr.response_types_hierarchical = True
 
@@ -360,6 +369,9 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_doc_document_controller(**attr):
 
+        s3db = current.s3db
+        s3 = current.response.s3
+
         current.deployment_settings.ui.export_formats = None
 
         if current.request.controller == "dvr":
@@ -368,11 +380,29 @@ def config(settings):
             attr["rheader"] = drk_dvr_rheader
 
             # Set contacts-method to retain the tab
-            s3db = current.s3db
             s3db.set_method("pr", "person",
                             method = "contacts",
                             action = s3db.pr_Contacts,
                             )
+
+        # Custom prep
+        standard_prep = s3.prep
+        def custom_prep(r):
+
+            # Call standard prep
+            if callable(standard_prep):
+                result = standard_prep(r)
+            else:
+                result = True
+
+            if r.controller == "dvr" and r.interactive:
+
+                table = r.table
+                field = table.doc_id
+                field.represent = s3db.dvr_DocEntityRepresent(show_link=True)
+
+            return result
+        s3.prep = custom_prep
 
         return attr
 
@@ -505,6 +535,22 @@ def config(settings):
                 if field.name != "shelter_unit_id" or not is_staff:
                     field.writable = False
 
+        if r.controller == "dvr" and \
+           r.name == "person" and not r.component:
+
+            # Configure anonymize-method
+            # TODO make standard via setting
+            from s3 import S3Anonymize
+            s3db.set_method("pr", "person",
+                            method = "anonymize",
+                            action = S3Anonymize,
+                            )
+
+            # Configure anonymize-rules
+            s3db.configure("pr_person",
+                           anonymize = drk_person_anonymize(),
+                           )
+
         # Configure components to inherit realm_entity
         # from the person record
         s3db.configure("pr_person",
@@ -523,6 +569,8 @@ def config(settings):
                                            "person_tag",
                                            ),
                        )
+
+        s3db.add_custom_callback("dvr_case", "onaccept", dvr_case_onaccept)
 
     settings.customise_pr_person_resource = customise_pr_person_resource
 
@@ -855,6 +903,11 @@ def config(settings):
                                          hidden = True,
                                          comment = T("Search for multiple IDs (separated by blanks)"),
                                          ),
+                            S3TextFilter(["service_contact.reference"],
+                                         label = T("Ref.No."),
+                                         hidden = True,
+                                         comment = T("Search by service contact reference number"),
+                                         ),
                             ]
                         if multiple_orgs:
                             filter_widgets.insert(1,
@@ -903,6 +956,33 @@ def config(settings):
 
             return result
         s3.prep = custom_prep
+
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+
+            # Call standard postp
+            if callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if r.controller == "dvr" and \
+               not r.component and r.record and \
+               r.method in (None, "update", "read") and \
+               isinstance(output, dict):
+
+                # Add anonymize-button
+                if "buttons" not in output:
+                    buttons = output["buttons"] = {}
+                else:
+                    buttons = output["buttons"]
+
+                from s3 import S3AnonymizeWidget
+                buttons["delete_btn"] = S3AnonymizeWidget.widget(
+                                            r,
+                                            _class="action-btn anonymize-btn",
+                                            )
+
+            return output
+        s3.postp = custom_postp
 
         # Custom rheader tabs
         if current.request.controller == "dvr":
@@ -1217,10 +1297,7 @@ def config(settings):
         # Custom onaccept to update realm-entity of the
         # beneficiary and case activities of this case
         # (incl. their respective realm components)
-        s3db.add_custom_callback("dvr_case",
-                                 "onaccept",
-                                 dvr_case_onaccept,
-                                 )
+        s3db.add_custom_callback("dvr_case", "onaccept", dvr_case_onaccept)
 
         # Update the realm-entity when the case gets updated
         # (because the assigned organisation/branch can change)
@@ -1309,6 +1386,10 @@ def config(settings):
         auth = current.auth
         s3db = current.s3db
 
+        if r.method == "count_due_followups":
+            # Just counting due followups => skip customisation
+            return
+
         human_resource_id = auth.s3_logged_in_human_resource()
 
         if r.method == "report":
@@ -1323,8 +1404,7 @@ def config(settings):
                     "status_id",
                     "priority",
                     "sector_id",
-                    "case_activity_need.need_id",
-                    "response_action.response_type_id",
+                    (T("Theme"), "response_action.response_theme_ids"),
                     )
             report_options = {
                 "rows": axes,
@@ -1364,6 +1444,36 @@ def config(settings):
             # Customise sector
             field = table.sector_id
             field.comment = None
+            root_org = auth.root_org()
+            if root_org and not auth.s3_has_roles("ADMIN", "ORG_GROUP_ADMIN"):
+
+                # Look up the sectors of the root org
+                db = current.db
+                ltable = s3db.org_sector_organisation
+                query = (ltable.organisation_id == root_org) & \
+                        (ltable.deleted == False)
+                rows = db(query).select(ltable.sector_id)
+                sector_ids = set(row.sector_id for row in rows)
+
+                # Include the sector_id of the current record (if any)
+                record = None
+                component = r.component
+                if not component:
+                    if r.tablename == "dvr_case_activity":
+                        record = r.record
+                elif component.tablename == "dvr_case_activity" and r.component_id:
+                    query = table.id == r.component_id
+                    record = db(query).select(table.sector_id,
+                                              limitby = (0, 1),
+                                              ).first()
+                if record and record.sector_id:
+                    sector_ids.add(record.sector_id)
+
+                # Limit the sector selection
+                subset = db(s3db.org_sector.id.belongs(sector_ids))
+                field.requires = IS_EMPTY_OR(IS_ONE_OF(subset, "org_sector.id",
+                                                       field.represent,
+                                                       ))
 
             # Show subject field
             field = table.subject
@@ -1419,14 +1529,14 @@ def config(settings):
             field.comment = None
 
             # Inline-needs
-            ntable = current.s3db.dvr_case_activity_need
-
-            field = ntable.human_resource_id
-            field.default = human_resource_id
-            field.widget = field.comment = None
-
-            field = ntable.need_id
-            field.comment = None
+            #ntable = current.s3db.dvr_case_activity_need
+            #
+            #field = ntable.human_resource_id
+            #field.default = human_resource_id
+            #field.widget = field.comment = None
+            #
+            #field = ntable.need_id
+            #field.comment = None
 
             # Inline-responses
             rtable = s3db.dvr_response_action
@@ -1435,6 +1545,33 @@ def config(settings):
             field.label = T("Assigned to")
             field.default = human_resource_id
             field.widget = field.comment = None
+
+            # If the user has no root org, then filter the themes
+            # selector by the root org of the case organisation
+            # (otherwise ADMINs see irrelevant themes in the list)
+            if not root_org and r.tablename == "pr_person" and r.record:
+
+                # Get the root_organisation of the case org
+                ctable = s3db.dvr_case
+                otable = s3db.org_organisation
+                left = otable.on(otable.id == ctable.organisation_id)
+                query = (ctable.person_id == r.record.id) & \
+                        (ctable.deleted == False)
+                row = current.db(query).select(otable.root_organisation,
+                                               left = left,
+                                               limitby = (0, 1),
+                                               orderby = ~ctable.modified_on,
+                                               ).first()
+
+                # Set filter for response_theme_ids.requires
+                if row:
+                    requires = rtable.response_theme_ids.requires
+                    if isinstance(requires, IS_EMPTY_OR):
+                        requires = requires.other
+                    if hasattr(requires, "set_filter"):
+                        requires.set_filter(filterby = "organisation_id",
+                                            filter_opts = (row.root_organisation,),
+                                            )
 
             # Inline-updates
             utable = current.s3db.dvr_case_activity_update
@@ -1456,22 +1593,22 @@ def config(settings):
                             "priority",
                             "human_resource_id",
 
-                            S3SQLInlineComponent("case_activity_need",
-                                                 label = T("Needs Assessment"),
-                                                 fields = [
-                                                     "date",
-                                                     "need_id",
-                                                     (T("Details"), "comments"),
-                                                     "human_resource_id",
-                                                     ],
-                                                 layout = S3SQLVerticalSubFormLayout,
-                                                 explicit_add = T("Add Need"),
-                                                 ),
+                            #S3SQLInlineComponent("case_activity_need",
+                            #                     label = T("Needs Assessment"),
+                            #                     fields = [
+                            #                         "date",
+                            #                         "need_id",
+                            #                         (T("Details"), "comments"),
+                            #                         "human_resource_id",
+                            #                         ],
+                            #                     layout = S3SQLVerticalSubFormLayout,
+                            #                     explicit_add = T("Add Need"),
+                            #                     ),
 
                             S3SQLInlineComponent("response_action",
                                                  label = T("Actions"),
                                                  fields = [
-                                                     "response_type_id",
+                                                     "response_theme_ids",
                                                      "date_due",
                                                      "comments",
                                                      "human_resource_id",
@@ -1631,12 +1768,12 @@ def config(settings):
                                                                          translate = True,
                                                                          ),
                                     ),
-                    S3OptionsFilter("case_activity_need.need_id",
-                                    options = lambda: s3_get_filter_opts("dvr_need",
-                                                                         translate = True,
-                                                                         ),
-                                    hidden = True,
-                                    ),
+                    #S3OptionsFilter("case_activity_need.need_id",
+                    #                options = lambda: s3_get_filter_opts("dvr_need",
+                    #                                                     translate = True,
+                    #                                                     ),
+                    #                hidden = True,
+                    #                ),
                     S3OptionsFilter("person_id$person_details.nationality",
                                     label = T("Client Nationality"),
                                     hidden = True,
@@ -1834,6 +1971,7 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_dvr_response_action_resource(r, tablename):
 
+        db = current.db
         s3db = current.s3db
 
         table = s3db.dvr_response_action
@@ -1847,6 +1985,15 @@ def config(settings):
 
         is_report = r.method == "report"
 
+        # Can the user see cases from more than one org?
+        realms = current.auth.permission.permitted_realms("dvr_case", "read")
+        if realms is None or len(realms) > 1:
+            multiple_orgs = True
+        else:
+            multiple_orgs = False
+
+        org_context = "case_activity_id$person_id$dvr_case.organisation_id"
+
         if is_report:
 
             # Custom Report Options
@@ -1859,15 +2006,18 @@ def config(settings):
                     "case_activity_id$person_id$person_details.nationality",
                     "case_activity_id$person_id$person_details.marital_status",
                     "case_activity_id$sector_id",
-                    "case_activity_id$case_activity_need.need_id",
-                    "response_type_id",
+                    (T("Theme"), "response_theme_ids"),
                     )
+            if multiple_orgs:
+                # Add case organisation as report axis
+                axes = axes + (org_context,)
+
             report_options = {
                 "rows": axes,
                 "cols": axes,
                 "fact": facts,
-                "defaults": {"rows": "response_type_id",
-                             "cols": "case_activity_id$case_activity_need.need_id",
+                "defaults": {"rows": "response_theme_ids",
+                             "cols": "case_activity_id$sector_id",
                              "fact": "count(id)",
                              "totals": True,
                              },
@@ -1883,7 +2033,6 @@ def config(settings):
             # Custom Filter Options
             from s3 import S3AgeFilter, \
                            S3DateFilter, \
-                           S3HierarchyFilter, \
                            S3OptionsFilter, \
                            S3TextFilter, \
                            s3_get_filter_opts
@@ -1898,18 +2047,22 @@ def config(settings):
                                 label = T("Search"),
                                 ),
                               S3OptionsFilter(
-                                "status_id",
-                                options = lambda: \
-                                          s3_get_filter_opts("dvr_response_status"),
-                                          cols = 3,
-                                          translate = True,
-                                          ),
+                                    "status_id",
+                                    options = lambda: \
+                                              s3_get_filter_opts("dvr_response_status"),
+                                    cols = 3,
+                                    translate = True,
+                                    ),
                               S3DateFilter("date", hidden=not is_report),
                               S3DateFilter("date_due", hidden=is_report),
-                              S3HierarchyFilter("response_type_id",
-                                                lookup = "dvr_response_type",
-                                                hidden = True,
-                                                ),
+                              S3OptionsFilter(
+                                    "response_theme_ids",
+                                    hidden = True,
+                                    options = lambda: \
+                                              s3_get_filter_opts("dvr_response_theme",
+                                                                 org_filter = True,
+                                                                 ),
+                                    ),
                               S3OptionsFilter("case_activity_id$person_id$person_details.nationality",
                                               label = T("Client Nationality"),
                                               hidden = True,
@@ -1923,6 +2076,27 @@ def config(settings):
                               #             hidden = True,
                               #             ),
                               ]
+
+            if r.interactive and multiple_orgs:
+                # Add case organisation filter
+                if realms:
+                    # Provide the realms as filter options
+                    otable = s3db.org_organisation
+                    orgs = db(otable.pe_id.belongs(realms)).select(otable.id)
+                    org_filter_opts = s3db.org_organisation_represent.bulk(
+                                            [org.id for org in orgs],
+                                            show_link = False,
+                                            )
+                    org_filter_opts.pop(None, None)
+                else:
+                    # Look up from records
+                    org_filter_opts = None
+                filter_widgets.insert(1,
+                                      S3OptionsFilter(org_context,
+                                                      options = org_filter_opts,
+                                                      ),
+                                      )
+
             s3db.configure("dvr_response_action",
                            filter_widgets = filter_widgets,
                            )
@@ -2215,6 +2389,16 @@ def config(settings):
             return result
 
         s3.prep = custom_prep
+
+        attr = dict(attr)
+        tabs = [(T("Basic Details"), None),
+                (T("Branches"), "branch"),
+                (T("Facilities"), "facility"),
+                (T("Staff & Volunteers"), "human_resource"),
+                #(T("Projects"), "project"),
+                (T("Counseling Themes"), "response_theme"),
+                ]
+        attr["rheader"] = lambda r: current.s3db.org_rheader(r, tabs=tabs)
 
         return attr
 
@@ -2811,6 +2995,225 @@ def drk_org_rheader(r, tabs=None):
                                                          record=record,
                                                          )
     return rheader
+
+# =============================================================================
+def drk_anonymous_address(record_id, field, value):
+    """
+        Helper to anonymize a pr_address location; removes street and
+        postcode details, but retains Lx ancestry for statistics
+
+        @param record_id: the pr_address record ID
+        @param field: the location_id Field
+        @param value: the location_id
+
+        @return: the location_id
+    """
+
+    s3db = current.s3db
+    db = current.db
+
+    # Get the location
+    if value:
+        ltable = s3db.gis_location
+        row = db(ltable.id == value).select(ltable.id,
+                                            ltable.level,
+                                            limitby = (0, 1),
+                                            ).first()
+        if not row.level:
+            # Specific location => remove address details
+            data = {"addr_street": None,
+                    "addr_postcode": None,
+                    "gis_feature_type": 0,
+                    "lat": None,
+                    "lon": None,
+                    "wkt": None,
+                    }
+            # Doesn't work - PyDAL doesn't detect the None value:
+            #if "the_geom" in ltable.fields:
+            #    data["the_geom"] = None
+            row.update_record(**data)
+            if "the_geom" in ltable.fields:
+                db.executesql("UPDATE gis_location SET the_geom=NULL WHERE id=%s" % row.id)
+
+    return value
+
+# -----------------------------------------------------------------------------
+def drk_obscure_dob(record_id, field, value):
+    """
+        Helper to obscure a date of birth; maps to the first day of
+        the quarter, thus retaining the approximate age for statistics
+
+        @param record_id: the pr_address record ID
+        @param field: the location_id Field
+        @param value: the location_id
+
+        @return: the new date
+    """
+
+    if value:
+        month = int((value.month - 1) / 3) * 3 + 1
+        value = value.replace(month=month, day=1)
+
+    return value
+
+# -----------------------------------------------------------------------------
+def drk_person_anonymize():
+    """ Rules to anonymize a case file """
+
+    ANONYMOUS = "-"
+
+    # Helper to produce an anonymous ID (pe_label)
+    anonymous_id = lambda record_id, f, v: "NN%06d" % long(record_id)
+
+    # General rule for attachments
+    documents = ("doc_document", {"key": "doc_id",
+                                  "match": "doc_id",
+                                  "fields": {"name": ("set", ANONYMOUS),
+                                             "file": "remove",
+                                             "comments": "remove",
+                                             },
+                                  "delete": True,
+                                  })
+
+    # Cascade rule for case activities
+    activity_details = [("dvr_response_action", {"key": "case_activity_id",
+                                                 "match": "id",
+                                                 "fields": {"comments": "remove",
+                                                            },
+                                               }),
+                        ("dvr_case_activity_need", {"key": "case_activity_id",
+                                                    "match": "id",
+                                                    "fields": {"comments": "remove",
+                                                               },
+                                                  }),
+                        ("dvr_case_activity_update", {"key": "case_activity_id",
+                                                      "match": "id",
+                                                      "fields": {"comments": ("set", ANONYMOUS),
+                                                                 },
+                                                      }),
+                        ]
+
+    rules = [# Remove identity of beneficiary
+             {"name": "default",
+              "title": "Names, IDs, Reference Numbers, Contact Information, Addresses",
+              "fields": {"first_name": ("set", ANONYMOUS),
+                         "last_name": ("set", ANONYMOUS),
+                         "pe_label": anonymous_id,
+                         "date_of_birth": drk_obscure_dob,
+                         "comments": "remove",
+                         },
+              "cascade": [("dvr_case", {"key": "person_id",
+                                        "match": "id",
+                                        "fields": {"comments": "remove",
+                                                   },
+                                        }),
+                          ("pr_contact", {"key": "pe_id",
+                                          "match": "pe_id",
+                                          "fields": {"contact_description": "remove",
+                                                     "value": ("set", ""),
+                                                     "comments": "remove",
+                                                     },
+                                          "delete": True,
+                                          }),
+                          ("pr_contact_emergency", {"key": "pe_id",
+                                                    "match": "pe_id",
+                                                    "fields": {"name": ("set", ANONYMOUS),
+                                                               "relationship": "remove",
+                                                               "phone": "remove",
+                                                               "comments": "remove",
+                                                               },
+                                                    "delete": True,
+                                                    }),
+                          ("pr_address", {"key": "pe_id",
+                                          "match": "pe_id",
+                                          "fields": {"location_id": drk_anonymous_address,
+                                                     "comments": "remove",
+                                                     },
+                                          }),
+                          ("pr_person_tag", {"key": "person_id",
+                                             "match": "id",
+                                             "fields": {"value": ("set", ANONYMOUS),
+                                                        },
+                                             "delete": True,
+                                             }),
+                          ("dvr_residence_status", {"key": "person_id",
+                                                    "match": "id",
+                                                    "fields": {"reference": ("set", ANONYMOUS),
+                                                               "comments": "remove",
+                                                               },
+                                                    }),
+                          ("dvr_service_contact", {"key": "person_id",
+                                                   "match": "id",
+                                                   "fields": {"reference": "remove",
+                                                              "contact": "remove",
+                                                              "phone": "remove",
+                                                              "email": "remove",
+                                                              "comments": "remove",
+                                                              },
+                                                   }),
+                          ],
+              },
+
+             # Remove activity details, appointments and notes
+             {"name": "activities",
+              "title": "Activity Details, Appointments, Notes",
+              "cascade": [("dvr_case_activity", {"key": "person_id",
+                                                 "match": "id",
+                                                 "fields": {"subject": ("set", ANONYMOUS),
+                                                            "need_details": "remove",
+                                                            "outcome": "remove",
+                                                            "comments": "remove",
+                                                            },
+                                                 "cascade": activity_details,
+                                                 }),
+                          ("dvr_case_appointment", {"key": "person_id",
+                                                    "match": "id",
+                                                    "fields": {"comments": "remove",
+                                                               },
+                                                    }),
+                          ("dvr_case_language", {"key": "person_id",
+                                                 "match": "id",
+                                                 "fields": {"comments": "remove",
+                                                            },
+                                                  }),
+                          ("dvr_note", {"key": "person_id",
+                                        "match": "id",
+                                        "fields": {"note": "remove",
+                                                   },
+                                        "delete": True,
+                                        }),
+                          ],
+              },
+
+             # Remove photos and attachments
+             {"name": "documents",
+              "title": "Photos and Documents",
+              "cascade": [("dvr_case", {"key": "person_id",
+                                        "match": "id",
+                                        "cascade": [documents,
+                                                    ],
+                                        }),
+                          ("dvr_case_activity", {"key": "person_id",
+                                                 "match": "id",
+                                                 "cascade": [documents,
+                                                             ],
+                                                 }),
+                          ("pr_image", {"key": "pe_id",
+                                        "match": "pe_id",
+                                        "fields": {"image": "remove",
+                                                   "url": "remove",
+                                                   "description": "remove",
+                                                   },
+                                        "delete": True,
+                                        }),
+                          ],
+              },
+
+              # TODO family membership
+
+             ]
+
+    return rules
 
 # =============================================================================
 class PriorityRepresent(object):

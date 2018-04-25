@@ -1640,10 +1640,16 @@ def config(settings):
 
             elif tablename == "dc_response":
 
-                tabs = (#(T("Basic Details"), None, {"native": 1}),
-                        (T("Answers"), "answer"),
-                        #(T("Attachments"), "document"),
-                        )
+                auth = current.auth
+                if not auth.s3_has_role(ADMIN) and \
+                       auth.s3_has_roles(("EVENT_MONITOR", "EVENT_ORGANISER", "EVENT_OFFICE_MANAGER")):
+                    # MFP shouldn't see the Individual Answers
+                    tabs = []
+                else:
+                    tabs = (#(T("Basic Details"), None, {"native": 1}),
+                            (T("Answers"), "answer"),
+                            #(T("Attachments"), "document"),
+                            )
 
                 from gluon import A, URL
 
@@ -1737,6 +1743,7 @@ def config(settings):
             elif tablename == "dc_target":
 
                 tabs = ((T("Basic Details"), None),
+                        (T("Report"), "results"),
                         (T("Responses"), "response"),
                         )
 
@@ -1849,59 +1856,60 @@ def config(settings):
             if callable(standard_prep):
                 result = standard_prep(r)
 
-            if r.interactive:
-                if not current.auth.s3_has_roles(("EVENT_MONITOR", "EVENT_ORGANISER", "EVENT_OFFICE_MANAGER")):
-                    # Simplify Interface
-                    menu = current.menu
-                    menu.breadcrumbs = None
-                    menu.main = ""
-                    menu.options = None
-                    s3.crud_strings["dc_response"]["title_display"] = ""
-                    if r.component_name == "answer":
-                        # CRUD Strings
-                        tablename = r.component.tablename
-                        s3.crud_strings[tablename].msg_record_created = T("Thank you for taking this survey and helping us to increase the quality of our trainings.")
-                        current.s3db.configure(tablename,
-                                               create_onaccept = dc_answer_onaccept,
-                                               )
-                        # Store tablename for onaccept
-                        s3.dc_dtablename = tablename
-                    #elif r.method == "create":
-                    #    target_id = r.get_vars.get("target_id")
-                    #    if target_id:
-                    #        s3db = current.s3db
-                    #        table = s3db.dc_response
-                    #        table.target_id.default = target_id
-                    #        ttable = s3db.dc_target
-                    #        target = current.db(ttable.id == target_id).select(ttable.template_id,
-                    #                                                           limitby = (0, 1)
-                    #                                                           ).first()
-                    #        try:
-                    #            table.template_id.default = target.template_id
-                    #        except:
-                    #            # Template not found?
-                    #            pass
-                    #        # Auto-submit form
-                    #        script = '''$('form').submit()'''
-                    #        s3.jquery_ready.append(script)
-                    #    else:
-                    #        # Block create
-                    #        current.response.error = T("Survey not specified, please click on original link to take survey")
-                    #        current.s3db.configure("dc_response",
-                    #                               insertable = False,
-                    #                               )
-                else:
-                    # Filter out date is None (unfilled responses)
-                    from s3 import FS
-                    r.resource.add_filter(FS("date") != None)
-
-                    current.s3db.configure("dc_response",
-                                           insertable = False,
-                                           list_fields = [(T("Event"), "target_id$training_event__link.training_event_id"),
-                                                          "date",
-                                                          "person_id",
-                                                          ],
+            # Need POST too to set Date properly
+            #if r.interactive:
+            if not current.auth.s3_has_roles(("EVENT_MONITOR", "EVENT_ORGANISER", "EVENT_OFFICE_MANAGER")):
+                # Simplify Interface
+                menu = current.menu
+                menu.breadcrumbs = None
+                menu.main = ""
+                menu.options = None
+                s3.crud_strings["dc_response"]["title_display"] = ""
+                if r.component_name == "answer":
+                    # CRUD Strings
+                    tablename = r.component.tablename
+                    s3.crud_strings[tablename].msg_record_created = T("Thank you for taking this survey and helping us to increase the quality of our trainings.")
+                    current.s3db.configure(tablename,
+                                           create_onaccept = dc_answer_onaccept,
                                            )
+                    # Store tablename for onaccept
+                    s3.dc_dtablename = tablename
+                #elif r.method == "create":
+                #    target_id = r.get_vars.get("target_id")
+                #    if target_id:
+                #        s3db = current.s3db
+                #        table = s3db.dc_response
+                #        table.target_id.default = target_id
+                #        ttable = s3db.dc_target
+                #        target = current.db(ttable.id == target_id).select(ttable.template_id,
+                #                                                           limitby = (0, 1)
+                #                                                           ).first()
+                #        try:
+                #            table.template_id.default = target.template_id
+                #        except:
+                #            # Template not found?
+                #            pass
+                #        # Auto-submit form
+                #        script = '''$('form').submit()'''
+                #        s3.jquery_ready.append(script)
+                #    else:
+                #        # Block create
+                #        current.response.error = T("Survey not specified, please click on original link to take survey")
+                #        current.s3db.configure("dc_response",
+                #                               insertable = False,
+                #                               )
+            elif r.interactive:
+                # Filter out date is None (unfilled responses)
+                from s3 import FS
+                r.resource.add_filter(FS("date") != None)
+
+                current.s3db.configure("dc_response",
+                                       insertable = False,
+                                       list_fields = [(T("Event"), "target_id$training_event__link.training_event_id"),
+                                                      "date",
+                                                      "person_id",
+                                                      ],
+                                       )
 
             return result
         s3.prep = custom_prep
@@ -1980,28 +1988,29 @@ def config(settings):
                 current.s3db.configure("dc_response",
                                        insertable = False,
                                        list_fields = ["person_id",
-                                                      "date",
+                                                      (T("Date Responded"), "date"),
                                                       ],
                                        )
 
             return result
         s3.prep = custom_prep
 
+        # MFP should NOT be able to see individual responses
         # Custom postp
-        standard_postp = s3.postp
-        def custom_postp(r, output):
-            # Call standard postp
-            if callable(standard_postp):
-                output = standard_postp(r, output)
+        #standard_postp = s3.postp
+        #def custom_postp(r, output):
+        #    # Call standard postp
+        #    if callable(standard_postp):
+        #        output = standard_postp(r, output)
 
-            if r.interactive and r.component_name == "response":
-                from gluon import URL
-                from s3 import S3CRUD
-                open_url = URL(f="respnse", args = ["[id]", "answer"])
-                S3CRUD.action_buttons(r, read_url=open_url, update_url=open_url)
+        #    if r.interactive and r.component_name == "response":
+        #        from gluon import URL
+        #        from s3 import S3CRUD
+        #        open_url = URL(f="respnse", args = ["[id]", "answer"])
+        #        S3CRUD.action_buttons(r, read_url=open_url, update_url=open_url)
 
-            return output
-        s3.postp = custom_postp
+        #    return output
+        #s3.postp = custom_postp
 
         attr["rheader"] = dc_rheader
 
@@ -2010,21 +2019,22 @@ def config(settings):
     settings.customise_dc_target_controller = customise_dc_target_controller
 
     # -------------------------------------------------------------------------
-    def hrm_notify_participants(training_event_id):
+    def hrm_notify_participants(training_event_id, redirect=True):
         """
-            Notify Participants to fill out the Survey
+            * Notify Participants to fill out the Survey
             - exclude Observers
+            * Update Date of Survey
+            * Schedule Task to send Report of results
         """
-
-        auth = current.auth
-        db = current.db
-        s3db = current.s3db
-
 
         import time
         from gluon import URL
         from gluon.utils import web2py_uuid
         from s3 import s3_fullname, s3_str, S3DateTime
+
+        db = current.db
+        auth = current.auth
+        s3db = current.s3db
 
         # Read the Event Details
         etable = s3db.hrm_training_event
@@ -2050,7 +2060,10 @@ def config(settings):
         target_id = target.id
         template_id = target.template_id
         default_language = target.language
-        target.update_record(date = current.request.utcnow)
+
+        # Update Survey Date
+        now = current.request.utcnow
+        target.update_record(date = now)
 
         # Build list of people to notify
         # - including their language
@@ -2093,7 +2106,8 @@ def config(settings):
                                    )
 
         # Build localised mail for each language
-        session_s3 = current.session.s3
+        session = current.session
+        session_s3 = session.s3
         ui_language = session_s3.language
         subject = "Placeholder Subject"
         line1 = "You are receiving this email as a participant of %(event_name)s held in %(location)s on %(date)s."
@@ -2138,7 +2152,8 @@ def config(settings):
         #        from gluon.contrib.pymysql import IntegrityError
         errors = {}
         success = 0
-        s3 = current.response.s3
+        response = current.response
+        s3 = response.s3
         s3.bulk = True # Don't send a Welcome Message for new users as we send our own message instead
         send_email = current.msg.send_by_pe_id
         rtable.date.default = None # Set the date when we answer
@@ -2279,14 +2294,73 @@ def config(settings):
         session_s3.language = ui_language
         T.force(ui_language)
 
-        return success, errors
+        # Communicate success / errors
+        if errors:
+            from gluon import A
+            bad = ""
+            for e in errors:
+                error = errors[e]
+                new_error = A("%s %s" % (error["first_name"],
+                                         error["last_name"]),
+                              _href=URL(c="hrm", f="person", args=e))
+                if bad:
+                    bad = "%s, %s" % (bad, new_error)
+                else:
+                    bad = new_error
+            warning = "%s: %s" % (s3_str(T("%i Notifications sent, but these participants couldn't be notified as User Accounts already exist with these email addresses")) % success,
+                                  bad)
+            if redirect:
+                session.warning = warning
+            else:
+                response.warning = warning
+        elif success:
+            if redirect:
+                session.confirmation = s3_str(T("%i Notifications sent!")) % success
+            else:
+                response.confirmation = s3_str(T("%i Notifications sent!")) % success
+        else:
+            if redirect:
+                session.information = T("No Notifications needed sending!")
+            else:
+                response.information = T("No Notifications needed sending!")
+
+        if success:
+            # Schedule Report
+            import json
+            from dateutil.relativedelta import relativedelta
+            ttable = s3db.scheduler_task
+            schedule_task = current.s3task.schedule_task
+            task_name = "dc_target_report"
+
+            # 1 month reminder
+            start_time = now + relativedelta(months = 1)
+            args = [target_id]
+            query = (ttable.task_name == task_name) & \
+                    (ttable.args == json.dumps(args))
+            exists = db(query).select(ttable.id,
+                                      ttable.start_time,
+                                      limitby = (0, 1)
+                                      ).first()
+            if exists:
+                if exists.start_time != start_time:
+                    exists.update_record(start_time = start_time)
+            else:
+                schedule_task(task_name,
+                              args = args,
+                              start_time = start_time,
+                              #period = 300,  # seconds
+                              timeout = 300, # seconds
+                              repeats = 1    # run once
+                              )
 
     # -------------------------------------------------------------------------
     def dc_target_onapprove(row):
         """
             Only used by Bangkok CCST currently
 
-            Send Notifications (& Update Date)
+            Send Notifications, inc:
+            * Update Survey Date
+            * Schedule Report
 
             @ToDo: Don't do this automatically for auto-approved manual surveys?
         """
@@ -2298,34 +2372,7 @@ def config(settings):
                                                                           limitby = (0, 1),
                                                                           ).first()
 
-        success, errors = hrm_notify_participants(training_event.training_event_id)
-
-        if errors:
-            from gluon import A, URL
-            from s3 import s3_str
-            bad = ""
-            for e in errors:
-                error = errors[e]
-                #new_error = "%s: %s" % (A("%s %s" % (error["first_name"],
-                #                                     error["last_name"]),
-                #                          _href=URL(c="hrm", f="person", args=e)),
-                #                        error["error"])
-                new_error = A("%s %s" % (error["first_name"],
-                                         error["last_name"]),
-                              _href=URL(c="hrm", f="person", args=e))
-                if bad:
-                    bad = "%s, %s" % (bad, new_error)
-                else:
-                    bad = new_error
-            current.response.warning = "%s: %s" % (s3_str(T("%i Notifications sent, but these participants couldn't be notified as User Accounts already exist with these email addresses")) % success,
-                                                   bad
-                                                   )
-        elif success:
-            from s3 import s3_str
-            current.response.confirmation = s3_str(T("%i Notifications sent!")) % success
-
-        else:
-            current.response.information = T("No Notifications needed sending!")
+        hrm_notify_participants(training_event.training_event_id, redirect=False)
 
     # -------------------------------------------------------------------------
     def customise_dc_target_resource(r, tablename):
@@ -3742,8 +3789,8 @@ def config(settings):
                     ptable.first_name.label = T("Name")
                     ptable.gender.label = T("Gender")
                     # Ensure that + appears at the beginning of the number
-                    # Done in Model
-                    #f = s3db.pr_phone_contact.value
+                    # Done in Model's controller prep
+                    #f = s3db.get_aliased(s3db.pr_contact, "pr_phone_contact").value
                     #f.represent = s3_phone_represent
                     #f.widget = S3PhoneWidget()
                     s3db.pr_address.location_id.widget = S3LocationSelector(show_address = T("Village"),
@@ -4813,37 +4860,11 @@ def config(settings):
             - exclude Observers
         """
 
-        from gluon import redirect, A, URL
+        from gluon import redirect, URL
 
         training_event_id = r.id
 
-        success, errors = hrm_notify_participants(training_event_id)
-
-        if errors:
-            from s3 import s3_str
-            bad = ""
-            for e in errors:
-                error = errors[e]
-                #new_error = "%s: %s" % (A("%s %s" % (error["first_name"],
-                #                                     error["last_name"]),
-                #                          _href=URL(c="hrm", f="person", args=e)),
-                #                        error["error"])
-                new_error = A("%s %s" % (error["first_name"],
-                                         error["last_name"]),
-                              _href=URL(c="hrm", f="person", args=e))
-                if bad:
-                    bad = "%s, %s" % (bad, new_error)
-                else:
-                    bad = new_error
-            current.session.warning = "%s: %s" % (s3_str(T("%i Notifications sent, but these participants couldn't be notified as User Accounts already exist with these email addresses")) % success,
-                                                  bad
-                                                  )
-        elif success:
-            from s3 import s3_str
-            current.session.confirmation = s3_str(T("%i Notifications sent!")) % success
-
-        else:
-            current.session.information = T("No Notifications needed sending!")
+        hrm_notify_participants(training_event_id, redirect=True)
 
         # Redirect to main event page
         redirect(URL(args=[training_event_id]))
@@ -4882,13 +4903,13 @@ def config(settings):
         else:
             auth = current.auth
 
-            s3db.set_method("hrm", "training_event",
-                            method = "notify",
-                            action = hrm_training_event_notify)
+            set_method = s3db.set_method
+            set_method("hrm", "training_event",
+                       method = "notify",
+                       action = hrm_training_event_notify)
 
             if not auth.s3_has_role("ADMIN"):
-                OM = auth.s3_has_role("EVENT_OFFICE_MANAGER")
-                if OM or auth.s3_has_roles(("EVENT_MONITOR", "EVENT_ORGANISER")):
+                if auth.s3_has_roles(("EVENT_MONITOR", "EVENT_ORGANISER", "EVENT_OFFICE_MANAGER")):
                     # Bangkok CCST
                     EVENTS = True
 
@@ -4936,7 +4957,7 @@ def config(settings):
 
             elif EVENTS:
                 if not r.component:
-                    if OM:
+                    if r.get_vars.get("dashboard"):
                         # Dashboard for Office Manager
                         #from dateutil.relativedelta import relativedelta
                         from s3 import S3DateTime, s3_auth_user_represent_name, s3_fieldmethod
@@ -5368,8 +5389,8 @@ def config(settings):
             f.readable = f.writable = True
             mtable.comments.label = T("Remarks")
             # Ensure that + appears at the beginning of the number
-            # Done in Model
-            #f = s3db.pr_phone_contact.value
+            # Done in controllers/member.py
+            #f = s3db.get_aliased(s3db.pr_contact, "pr_phone_contact").value
             #f.represent = s3_phone_represent
             #f.widget = S3PhoneWidget()
             s3db.pr_address.location_id.widget = S3LocationSelector(show_address = T("Village"),
@@ -6485,8 +6506,8 @@ def config(settings):
                 from gluon import IS_EMPTY_OR
                 from s3 import IS_ONE_OF, S3SQLCustomForm, S3SQLInlineComponent, S3LocationSelector
                 # Ensure that + appears at the beginning of the number
-                # Done in Model
-                #f = s3db.pr_phone_contact.value
+                # Done in Model's controller prep
+                #f = s3db.get_aliased(s3db.pr_contact, "pr_phone_contact").value
                 #f.represent = s3_phone_represent
                 #f.widget = S3PhoneWidget()
                 s3db.pr_address.location_id.widget = S3LocationSelector(show_address = T("Village"),

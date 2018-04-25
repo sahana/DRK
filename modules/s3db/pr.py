@@ -60,6 +60,7 @@ __all__ = (# PR Base Entities
            "pr_PersonEntityRepresent",
            "pr_PersonRepresent",
            "pr_person_phone_represent",
+           #"pr_person_email_phone_represent",
            "pr_person_comment",
            "pr_image_library_represent",
            "pr_url_represent",
@@ -465,9 +466,7 @@ class PRPersonEntityModel(S3Model):
         value = get_vars.term or get_vars.value or get_vars.q or None
 
         if not value:
-            output = current.xml.json_message(False, 400,
-                                              "No search term specified")
-            raise HTTP(400, body=output)
+            r.error(400, "No search term specified")
 
         # We want to do case-insensitive searches
         # (default anyway on MySQL/SQLite, but not PostgreSQL)
@@ -1527,8 +1526,7 @@ class PRPersonModel(S3Model):
         value = get_vars.term or get_vars.value or get_vars.q or None
 
         if not value:
-            output = current.xml.json_message(False, 400, "No value provided!")
-            raise HTTP(400, body=output)
+            r.error(400, "No value provided!")
 
         # We want to do case-insensitive searches
         # (default anyway on MySQL/SQLite, but not PostgreSQL)
@@ -3190,10 +3188,10 @@ class PRForumModel(S3Model):
 
         forum_id = r.id
         if not forum_id:
-            raise HTTP(405, current.ERROR.BAD_METHOD)
+            r.error(405, current.ERROR.BAD_METHOD)
         user = current.auth.user
         if not user:
-            raise HTTP(405, current.ERROR.BAD_METHOD)
+            r.error(405, current.ERROR.BAD_METHOD)
 
         db = current.db
         s3db = current.s3db
@@ -3241,10 +3239,10 @@ class PRForumModel(S3Model):
 
         forum_id = r.id
         if not forum_id:
-            raise HTTP(405, current.ERROR.BAD_METHOD)
+            r.error(405, current.ERROR.BAD_METHOD)
         user = current.auth.user
         if not user:
-            raise HTTP(405, current.ERROR.BAD_METHOD)
+            r.error(405, current.ERROR.BAD_METHOD)
 
         s3db = current.s3db
         ptable = s3db.pr_person
@@ -3284,10 +3282,10 @@ class PRForumModel(S3Model):
 
         forum_id = r.id
         if not forum_id:
-            raise HTTP(405, current.ERROR.BAD_METHOD)
+            r.error(405, current.ERROR.BAD_METHOD)
         user = current.auth.user
         if not user:
-            raise HTTP(405, current.ERROR.BAD_METHOD)
+            r.error(405, current.ERROR.BAD_METHOD)
 
         db = current.db
         s3db = current.s3db
@@ -6599,7 +6597,8 @@ def pr_person_phone_represent(person_id, show_link=True):
     ctable = s3db.pr_contact
     query = (ptable.id == person_id)
     left = ctable.on((ctable.pe_id == ptable.pe_id) & \
-                     (ctable.contact_method == "SMS"))
+                     (ctable.contact_method == "SMS") & \
+                     (ctable.deleted == False))
     row = current.db(query).select(ptable.first_name,
                                    ptable.middle_name,
                                    ptable.last_name,
@@ -6618,6 +6617,77 @@ def pr_person_phone_represent(person_id, show_link=True):
         repr_str = "%s %s" % (repr_str,
                               s3_phone_represent(row.pr_contact.value),
                               )
+    if show_link:
+        request = current.request
+        group = request.get_vars.get("group", None)
+        c = request.controller
+        if group == "staff" or c == "hrm":
+            controller = "hrm"
+        elif group == "volunteer" or c == "vol":
+            controller = "vol"
+        else:
+            controller = "pr"
+        repr_str = A(repr_str,
+                     _href = URL(c = controller,
+                                 f = "person",
+                                 args = [person_id, "contact"],
+                                 ),
+                     )
+    return repr_str
+
+# =============================================================================
+def pr_person_email_phone_represent(person_id, show_link=True):
+    """
+        Represent a Person with their email and phone number
+        - currently unused
+
+        @param show_link: whether to make the output into a hyperlink
+    """
+
+    if not person_id:
+        return current.messages["NONE"]
+
+    s3db = current.s3db
+    ptable = s3db.pr_person
+    ctable = s3db.pr_contact
+    query = (ptable.id == person_id)
+    left = ctable.on((ctable.pe_id == ptable.pe_id) & \
+                     (ctable.contact_method.belongs(("EMAIL", "SMS"))) & \
+                     (ctable.deleted == False))
+    rows = current.db(query).select(ptable.first_name,
+                                    ptable.middle_name,
+                                    ptable.last_name,
+                                    ctable.contact_method,
+                                    ctable.priority,
+                                    ctable.value,
+                                    left = left,
+                                    orderby = ctable.priority,
+                                    )
+
+    try:
+        person = rows.first().pr_person
+    except AttributeError:
+        return current.messages.UNKNOWN_OPT
+
+    repr_str = s3_fullname(person)
+
+    phone = None
+    email = None
+    for row in rows:
+        contact = row.pr_contact
+        if not email and contact.contact_method == "EMAIL":
+            email = contact.value
+        elif not phone and contact.contact_method == "SMS":
+            phone = contact.value
+    if email:
+        repr_str = "%s <%s>" % (repr_str,
+                                email,
+                                )
+    if phone:
+        repr_str = "%s %s" % (repr_str,
+                              s3_phone_represent(phone),
+                              )
+
     if show_link:
         request = current.request
         group = request.get_vars.get("group", None)

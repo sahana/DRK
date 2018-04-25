@@ -718,6 +718,7 @@ class S3Resource(object):
                         callback(ondelete_cascade, row, tablename=tablename)
                     except:
                         # Custom RESTRICT or cascade failure: row not deletable
+                        deletable.discard(record_id)
                         continue
                     if record_id not in deletable:
                         # Check deletability again
@@ -1401,7 +1402,7 @@ class S3Resource(object):
         load_uids = hasattr(table, UID)
 
         if not skip:
-            skip = tuple()
+            skip = ()
 
         if fields or skip:
             s3 = current.response.s3

@@ -231,19 +231,19 @@ class S3Represent(object):
     """
 
     def __init__(self,
-                 lookup=None,
-                 key=None,
-                 fields=None,
-                 labels=None,
-                 options=None,
-                 translate=False,
-                 linkto=None,
-                 show_link=False,
-                 multiple=False,
-                 hierarchy=False,
-                 default=None,
-                 none=None,
-                 field_sep=" "
+                 lookup = None,
+                 key = None,
+                 fields = None,
+                 labels = None,
+                 options = None,
+                 translate = False,
+                 linkto = None,
+                 show_link = False,
+                 multiple = False,
+                 hierarchy = False,
+                 default = None,
+                 none = None,
+                 field_sep = " "
                  ):
         """
             Constructor
@@ -1325,8 +1325,6 @@ def s3_comments(name="comments", **attr):
         Return a standard Comments field
     """
 
-    from s3widgets import s3_comments_widget
-
     T = current.T
     if "label" not in attr:
         attr["label"] = T("Comments")
@@ -1335,6 +1333,7 @@ def s3_comments(name="comments", **attr):
         attr["represent"] = lambda comments: \
             XML(comments) if comments else current.messages["NONE"]
     if "widget" not in attr:
+        from s3widgets import s3_comments_widget
         attr["widget"] = s3_comments_widget
     if "comment" not in attr:
         attr["comment"] = DIV(_class="tooltip",

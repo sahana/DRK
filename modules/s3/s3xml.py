@@ -230,11 +230,13 @@ class S3XML(S3Codec):
             except:
                 self.error = "XML Source error: %s" % sys.exc_info()[1]
                 return None
+
         try:
             parser = etree.XMLParser(huge_tree = True, # Support large WKT fields
                                      no_network = False,
                                      remove_blank_text = True,
                                      )
+            parser.resolvers.add(S3EntityResolver(source))
             result = etree.parse(source, parser)
             return result
         except:
@@ -2303,7 +2305,7 @@ class S3XML(S3Codec):
         if error_tree is None:
             return errors
 
-        elements = error_tree.xpath(".//*[@error]")
+        elements = error_tree.xpath(".//*[@error][not(.//*[@error])]")
         for element in elements:
             get = element.get
             if element.tag == "data":
@@ -2311,20 +2313,19 @@ class S3XML(S3Codec):
                 value = get("value")
                 if not value:
                     value = element.text
-                error = "%s, %s: '%s' (value='%s')" % (
-                            resource.get("name", None),
-                            get("field", None),
-                            get("error", None),
-                            value)
-            if element.tag == "reference":
+                error = "%s: '%s' (value='%s')" % (resource.get("name"),
+                                                   get("error"),
+                                                   value,
+                                                   )
+            elif element.tag == "reference":
                 resource = element.getparent()
-                error = "%s, %s: '%s'" % (
-                            resource.get("name", None),
-                            get("field", None),
-                            get("error", None))
+                error = "%s: '%s'" % (resource.get("name"),
+                                      get("error"),
+                                      )
             elif element.tag == "resource":
-                error = "%s: %s" % (get("name", None),
-                                    get("error", None))
+                error = "%s: %s" % (get("name"),
+                                    get("error"),
+                                    )
             else:
                 error = "%s" % get("error", None)
             errors.append(error)
@@ -2690,6 +2691,57 @@ class S3XML(S3Codec):
         #sys.stderr.write(cls.tostring(root, pretty_print=True))
 
         return  etree.ElementTree(root)
+
+# =============================================================================
+class S3EntityResolver(etree.Resolver):
+    """ Safe entity resolver for S3XML.parse """
+
+    def __init__(self, source):
+        """
+            Constructor
+
+            @param source: the document source, to distinguish it from
+                           other external entities (if it is an external
+                           entity itself)
+        """
+
+        super(S3EntityResolver, self).__init__()
+
+        if isinstance(source, basestring):
+            self.source = source
+        else:
+            self.source = None
+
+    # -------------------------------------------------------------------------
+    def resolve(self, system_url, public_id, context):
+        """
+            Safe resolution of external parsed entities
+
+            @param system_url: the system URL of the external entity
+            @param public_id: the public ID of the entity
+            @param context: opaque context object
+        """
+
+        if system_url == self.source:
+            # Default resolver
+            return None
+
+        else:
+            import urlparse
+            p = urlparse.urlparse(system_url)
+
+            if p.scheme in ("", "file"):
+
+                # Get the real path of the referenced file
+                path = os.path.realpath(os.path.join(p.netloc, p.path))
+
+                # Deny all access outside of app-local static-folder
+                static = os.path.realpath(os.path.join(current.request.folder, "static"))
+                if not os.path.commonprefix([path, static]) == static:
+                    raise IOError('Illegal access to local file %s' % system_url)
+
+        # Allow everything else (fall back to default resolver)
+        return None
 
 # =============================================================================
 class S3XMLFormat(object):

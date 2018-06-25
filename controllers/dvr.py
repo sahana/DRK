@@ -194,8 +194,7 @@ def person():
                                 "gender",
                                 S3SQLInlineComponent(
                                         "contact",
-                                        fields = [("", "value"),
-                                                  ],
+                                        fields = [("", "value")],
                                         filterby = {"field": "contact_method",
                                                     "options": "EMAIL",
                                                     },
@@ -205,8 +204,7 @@ def person():
                                         ),
                                 S3SQLInlineComponent(
                                         "contact",
-                                        fields = [("", "value"),
-                                                  ],
+                                        fields = [("", "value")],
                                         filterby = {"field": "contact_method",
                                                     "options": "SMS",
                                                     },
@@ -218,8 +216,7 @@ def person():
                                 S3SQLInlineComponent(
                                         "address",
                                         label = T("Current Address"),
-                                        fields = [("", "location_id"),
-                                                  ],
+                                        fields = [("", "location_id")],
                                         filterby = {"field": "type",
                                                     "options": "1",
                                                     },
@@ -844,6 +841,11 @@ def response_action():
     def prep(r):
 
         resource = r.resource
+
+        if not r.record:
+            # Filter out response actions of archived cases
+            query = (FS("case_activity_id$person_id$dvr_case.archived") == False)
+            resource.add_filter(query)
 
         mine = r.get_vars.get("mine")
         if mine == "a":

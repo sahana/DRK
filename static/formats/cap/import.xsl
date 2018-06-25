@@ -6,7 +6,7 @@
 
          CAP Import Templates for Sahana Eden
 
-         Copyright (c) 2011-16 Sahana Software Foundation
+         Copyright (c) 2011-18 Sahana Software Foundation
 
          Permission is hereby granted, free of charge, to any person
          obtaining a copy of this software and associated documentation
@@ -338,13 +338,13 @@
 
     <!-- ****************************************************************** -->
     <xsl:template match="cap:parameter">
-        <resource name="cap_info_parameter">                    
+        <resource name="cap_info_parameter">
             <data field="name">
                 <xsl:value-of select="cap:valueName" />
             </data>
             <data field="value">
                 <xsl:value-of select="cap:value" />
-            </data>            
+            </data>
         </resource>
     </xsl:template>
 
@@ -460,7 +460,7 @@
                     <data field="lon">
                         <xsl:value-of select="substring-after(substring-before($value, ' '), ',')"/>
                     </data>
-                    
+
                     <data field="radius">
                         <!-- Radius comes in as km, so convert to m -->
                         <xsl:value-of select="number($radius) * 1000"/>
@@ -558,5 +558,5 @@
             </data>
         </resource>
     </xsl:template>
-    
+
 </xsl:stylesheet>

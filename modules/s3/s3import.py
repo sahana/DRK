@@ -3050,19 +3050,28 @@ class S3ImportJob():
             cnames = Storage()
             cinfos = Storage()
             for alias in components:
+
                 component = components[alias]
+
+                ctable = component.table
+                if ctable._id != "id" and "instance_type" in ctable.fields:
+                    # Super-entities cannot be imported to directly => skip
+                    continue
+
+                # Determine the keys
                 pkey = component.pkey
                 if component.linktable:
                     ctable = component.linktable
                     fkey = component.lkey
                 else:
-                    ctable = component.table
                     fkey = component.fkey
+
                 ctablename = ctable._tablename
                 if ctablename in cnames:
                     cnames[ctablename].append(alias)
                 else:
                     cnames[ctablename] = [alias]
+
                 cinfos[(ctablename, alias)] = Storage(component = component,
                                                       ctable = ctable,
                                                       pkey = pkey,
@@ -4418,13 +4427,12 @@ class S3BulkImporter(object):
         """
 
         if url == "unifont":
-            #UNIFONT = True
-            url = "http://unifoundry.com/pub/unifont-7.0.06/font-builds/unifont-7.0.06.ttf"
+            #url = "http://unifoundry.com/pub/unifont-7.0.06/font-builds/unifont-7.0.06.ttf"
+            url = "http://unifoundry.com/pub/unifont-10.0.07/font-builds/unifont-10.0.07.ttf"
             # Rename to make version upgrades be transparent
             filename = "unifont.ttf"
             extension = "ttf"
         else:
-            #UNIFONT = False
             filename = url.split("/")[-1]
             filename, extension = filename.rsplit(".", 1)
 

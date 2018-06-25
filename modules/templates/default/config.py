@@ -67,6 +67,8 @@ def config(settings):
     #settings.auth.registration_requests_organisation = True
     # Uncomment this to have the Organisation selection during registration be mandatory
     #settings.auth.registration_organisation_required = True
+    # Uncomment this to hide the Create-Organisation link in registration forms
+    #settings.auth.registration_organisation_link_create = False
     # Uncomment this to have the Organisation input hidden unless the user enters a non-whitelisted domain
     #settings.auth.registration_organisation_hidden = True
     # Uncomment this to default the Organisation during registration
@@ -134,6 +136,7 @@ def config(settings):
         ("ar", "Arabic"),
         ("bs", "Bosnian"),
         #("dv", "Divehi"), # Maldives
+        #("dz", "Dzongkha"), # Bhutan
         ("en", "English"),
         ("fr", "French"),
         ("de", "German"),
@@ -457,6 +460,11 @@ def config(settings):
     #settings.ui.menu_logo = URL(c="static", f="img", args=["S3menulogo.png"])
 
     # -------------------------------------------------------------------------
+    # Sync
+    # Uncomment if this deployment exposes public data sets
+    #settings.sync.data_repository = True
+
+    # -------------------------------------------------------------------------
     # Asset
     # Uncomment to have a specific asset type for Telephones
     #settings.asset.telephones = True
@@ -567,6 +575,8 @@ def config(settings):
     # Events
     # Uncomment to use the term Disaster instead of Event
     #settings.event.label = "Disaster"
+    # Uncomment to not use Incidents under Events
+    #settings.event.incident = False
     # Uncomment to preserve linked Incidents when an Event is deleted
     # NB Changing this setting requires a DB migration
     #settings.event.cascade_delete_incidents = False
@@ -631,6 +641,8 @@ def config(settings):
     #settings.org.autocomplete = True
     # Enable the Organisation Sector field
     #settings.org.sector = True
+    # But hide it from the rheader
+    #settings.org.sector_rheader = False
     # Enable the use of Organisation Branches
     #settings.org.branches = True
     # Show branches as tree rather than as table
@@ -646,6 +658,8 @@ def config(settings):
     #settings.org.organisation_types_hierarchical = True
     # Make Organisation Types Multiple
     #settings.org.organisation_types_multiple = True
+    # Show Organisation Types in the rheader
+    #settings.org.organisation_type_rheader = True
     # Enable the use of Organisation Regions
     #settings.org.regions = True
     # Make Organisation Regions Hierarchical
@@ -916,9 +930,12 @@ def config(settings):
 
     # -------------------------------------------------------------------------
     # Supply
+    # Name of the Default Item Catalog. Do not edit after deployment
+    #settings.supply.catalog_default = "Default"
+    # Disable the use of Multiple Item Catalogs
+    #settings.supply.catalog_multi = False
+    # Disable the use of Alternative Items
     #settings.supply.use_alt_name = False
-    # Do not edit after deployment
-    #settings.supply.catalog_default = T("Default")
 
     # -------------------------------------------------------------------------
     # Projects
@@ -938,6 +955,10 @@ def config(settings):
     #settings.project.activity_types = True
     # Uncomment this to filter dates in Activities
     #settings.project.activity_filter_year = True
+    # Uncomment this to not use Beneficiaries for Activities
+    #settings.project.get_project_activity_beneficiaries = False
+    # Uncomment this to not use Item Catalog for Distributions
+    #settings.project.activity_items = False
     # Uncomment this to use Codes for projects
     #settings.project.codes = True
     # Uncomment this to call project locations 'Communities'

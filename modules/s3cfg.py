@@ -145,6 +145,7 @@ class S3Config(Storage):
     # Unifont can be downloaded from http://unifoundry.com/pub/unifont-7.0.06/font-builds/unifont-7.0.06.ttf
     fonts = {"ar": ["unifont", "unifont"],
              #"dv": ["unifont", "unifont"],
+             #"dz": ["unifont", "unifont"],
              "km": ["unifont", "unifont"],
              "ko": ["unifont", "unifont"],
              "mn": ["unifont", "unifont"],
@@ -662,26 +663,29 @@ class S3Config(Storage):
         " Make the selection of Organisation required during registration "
         return self.auth.get("registration_organisation_required", False)
 
+    def get_auth_registration_organisation_link_create(self):
+        """ Show a link to create new orgs in registration form """
+        return self.auth.get("registration_organisation_link_create", True)
+
     def get_auth_registration_organisation_hidden(self):
         " Hide the Organisation field in the registration form unless an email is entered which isn't whitelisted "
         return self.auth.get("registration_organisation_hidden", False)
 
     def get_auth_registration_organisation_default(self):
-        " Default the Organisation during registration "
-        return self.auth.get("registration_organisation_default")
-
-    def get_auth_registration_organisation_id_default(self):
         " Default the Organisation during registration - will return the organisation_id"
-        name = self.auth.get("registration_organisation_default")
-        if name:
-            otable = current.s3db.org_organisation
-            orow = current.db(otable.name == name).select(otable.id).first()
-            if orow:
-                organisation_id = orow.id
-            else:
-                organisation_id = otable.insert(name = name)
-        else:
-            organisation_id = None
+        organisation_id = self.__lazy("auth", "registration_organisation_default", default=None)
+        if organisation_id:
+            try:
+                int(organisation_id)
+            except:
+                # Must be a Name
+                table = current.s3db.org_organisation
+                row = current.db(table.name == organisation_id).select(table.id,
+                                                                       ).first()
+                if row:
+                    organisation_id = row.id
+                else:
+                    organisation_id = table.insert(name = name)
         return organisation_id
 
     def get_auth_registration_requests_organisation_group(self):
@@ -867,11 +871,6 @@ class S3Config(Storage):
 
     # -------------------------------------------------------------------------
     # Base settings
-    def get_instance_name(self):
-        """
-            Instance Name - for management scripts. e.g. prod or test
-        """
-        return self.base.get("instance_name", "")
     def get_system_name(self):
         """
             System Name - for the UI & Messaging
@@ -2572,6 +2571,11 @@ class S3Config(Storage):
         """
         return self.sync.get("upload_filename", "$s $r")
 
+    def get_sync_data_repository(self):
+        """ This deployment is a public data repository """
+
+        return self.sync.get("data_repository", False)
+
     # =========================================================================
     # Modules
 
@@ -3249,6 +3253,12 @@ class S3Config(Storage):
         """
         return self.event.get("label", None)
 
+    def get_event_incident(self):
+        """
+            Whether Events have Incidents
+        """
+        return self.event.get("incident", True)
+
     def get_event_cascade_delete_incidents(self):
         """
             Whether deleting an Event cascades to deleting all Incidents or whether it sets NULL
@@ -3302,18 +3312,6 @@ class S3Config(Storage):
         """
         return self.event.get("dc_target_tab", True)
 
-    def get_event_impact_tab(self):
-        """
-            Whether to show the impact tab for events
-        """
-        return self.event.get("impact_tab", True)
-
-    def get_incident_impact_tab(self):
-        """
-            Whether to show the impact tab for incidents
-        """
-        return self.event.get("incident_impact_tab", False)
-
     def get_event_dispatch_tab(self):
         """
             Whether to show the dispatch tab for events
@@ -3323,6 +3321,12 @@ class S3Config(Storage):
         else:
             return False
 
+    def get_event_impact_tab(self):
+        """
+            Whether to show the impact tab for events
+        """
+        return self.event.get("impact_tab", True)
+
     def get_incident_dispatch_tab(self):
         """
             Whether to show the dispatch tab for incidents
@@ -3331,6 +3335,12 @@ class S3Config(Storage):
             return self.event.get("incident_dispatch_tab", True)
         else:
             return False
+
+    def get_incident_impact_tab(self):
+        """
+            Whether to show the impact tab for incidents
+        """
+        return self.event.get("incident_impact_tab", False)
 
     def get_incident_teams_tab(self):
         """
@@ -4140,11 +4150,23 @@ class S3Config(Storage):
                         current.session.s3.default_site_id = default_site
         return default_site
 
+    def get_org_country(self):
+        """
+            Whether to expose the "country" field of organisations
+        """
+        return self.org.get("country", True)
+
     def get_org_sector(self):
         """
             Whether to use an Organization Sector field
         """
         return self.org.get("sector", False)
+
+    def get_org_sector_rheader(self):
+        """
+            Whether Sectors should be visible in the rheader
+        """
+        return self.org.get("sector_rheader", self.get_org_sector())
 
     def get_org_branches(self):
         """
@@ -4183,6 +4205,12 @@ class S3Config(Storage):
             Whether Organisation Types are Multiple or not
         """
         return self.org.get("organisation_types_multiple", False)
+
+    def get_org_organisation_type_rheader(self):
+        """
+            Whether Organisation Types are visible in the rheader
+        """
+        return self.org.get("organisation_type_rheader", False)
 
     def get_org_facilities_tab(self):
         """
@@ -4577,6 +4605,24 @@ class S3Config(Storage):
             Use Activities in Projects & Tasks
         """
         return self.project.get("activities", False)
+
+    def get_project_activity_beneficiaries(self):
+        """
+            Use Beneficiaries in Activities
+        """
+        setting = self.project.get("activity_beneficiaries", None)
+        if setting is None:
+            setting = self.has_module("stats")
+        return setting
+
+    def get_project_activity_items(self):
+        """
+            Use Items in Activities
+        """
+        setting = self.project.get("activity_items", None)
+        if setting is None:
+            setting = self.has_module("supply")
+        return setting
 
     def get_project_activity_sectors(self):
         """
@@ -5040,9 +5086,21 @@ class S3Config(Storage):
     # Supply
     #
     def get_supply_catalog_default(self):
-        return self.inv.get("catalog_default", "Default")
+        """
+            The name of the Default Item Catalog
+        """
+        return self.supply.get("catalog_default", "Default")
+
+    def get_supply_catalog_multi(self):
+        """
+            Whether to use Multiple Item Catalogs
+        """
+        return self.supply.get("catalog_multi", True)
 
     def get_supply_use_alt_name(self):
+        """
+            Whether to allow Alternative Items to be defined
+        """
         return self.supply.get("use_alt_name", True)
 
     # -------------------------------------------------------------------------

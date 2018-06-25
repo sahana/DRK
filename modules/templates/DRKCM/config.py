@@ -34,11 +34,18 @@ def config(settings):
     #settings.auth.registration_requires_verification = True
     # Do new users need to be approved by an administrator prior to being able to login?
     #settings.auth.registration_requires_approval = True
+
+    # Request Organisation during user registration
     settings.auth.registration_requests_organisation = True
+    # Suppress popup-link for creating organisations during user registration
+    settings.auth.registration_organisation_link_create = False
+
     settings.auth.registration_link_user_to = {"staff": T("Staff"),
                                                "volunteer": T("Volunteer"),
                                                }
-    #settings.auth.registration_link_user_to_default = "staff"
+    settings.auth.registration_link_user_to_default = "staff"
+
+    # Disable password-retrieval feature
     settings.auth.password_retrieval = False
 
     # Approval emails get sent to all admins
@@ -272,8 +279,11 @@ def config(settings):
     # Organisations Module Settings
     #
     settings.org.sector = True
+    # But hide it from the rheader
+    settings.org.sector_rheader = False
     settings.org.branches = True
     settings.org.offices_tab = False
+    settings.org.country = False
 
     # -------------------------------------------------------------------------
     # Persons Module Settings
@@ -783,8 +793,7 @@ def config(settings):
                             S3SQLInlineComponent(
                                     "address",
                                     label = T("Current Address"),
-                                    fields = [("", "location_id"),
-                                              ],
+                                    fields = [("", "location_id")],
                                     filterby = {"field": "type",
                                                 "options": "1",
                                                 },
@@ -793,8 +802,7 @@ def config(settings):
                                     ),
                             S3SQLInlineComponent(
                                     "bamf",
-                                    fields = [("", "value"),
-                                              ],
+                                    fields = [("", "value")],
                                     filterby = {"field": "tag",
                                                 "options": "BAMF",
                                                 },
@@ -821,8 +829,7 @@ def config(settings):
                             "person_details.occupation",
                             S3SQLInlineComponent(
                                     "contact",
-                                    fields = [("", "value"),
-                                                ],
+                                    fields = [("", "value")],
                                     filterby = {"field": "contact_method",
                                                 "options": "SMS",
                                                 },
@@ -2007,6 +2014,7 @@ def config(settings):
                     "case_activity_id$person_id$person_details.marital_status",
                     "case_activity_id$sector_id",
                     (T("Theme"), "response_theme_ids"),
+                    "human_resource_id",
                     )
             if multiple_orgs:
                 # Add case organisation as report axis
@@ -2021,6 +2029,8 @@ def config(settings):
                              "fact": "count(id)",
                              "totals": True,
                              },
+                "precision": {"hours": 2, # higher precision is impractical
+                              },
                 }
             s3db.configure("dvr_response_action",
                            report_options = report_options,
@@ -2111,6 +2121,24 @@ def config(settings):
         return attr
 
     settings.customise_dvr_response_action_controller = customise_dvr_response_action_controller
+
+    # -------------------------------------------------------------------------
+    def customise_dvr_response_theme_resource(r, tablename):
+
+        current.response.s3.crud_strings["dvr_response_theme"] = Storage(
+            label_create = T("Create Counseling Theme"),
+            title_display = T("Counseling Theme Details"),
+            title_list = T("Counseling Themes"),
+            title_update = T("Edit Counseling Theme"),
+            label_list_button = T("List Counseling Themes"),
+            label_delete_button = T("Delete Counseling Theme"),
+            msg_record_created = T("Counseling Theme created"),
+            msg_record_modified = T("Counseling Theme updated"),
+            msg_record_deleted = T("Counseling Theme deleted"),
+            msg_list_empty = T("No Counseling Themes currently defined"),
+        )
+
+    settings.customise_dvr_response_theme_resource = customise_dvr_response_theme_resource
 
     # -------------------------------------------------------------------------
     def customise_dvr_service_contact_resource(r, tablename):
@@ -2391,14 +2419,7 @@ def config(settings):
         s3.prep = custom_prep
 
         attr = dict(attr)
-        tabs = [(T("Basic Details"), None),
-                (T("Branches"), "branch"),
-                (T("Facilities"), "facility"),
-                (T("Staff & Volunteers"), "human_resource"),
-                #(T("Projects"), "project"),
-                (T("Counseling Themes"), "response_theme"),
-                ]
-        attr["rheader"] = lambda r: current.s3db.org_rheader(r, tabs=tabs)
+        attr["rheader"] = drk_org_rheader
 
         return attr
 
@@ -2965,11 +2986,13 @@ def drk_org_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, S3ResourceHeader
+    from s3 import s3_rheader_resource, s3_rheader_tabs, S3ResourceHeader
+
+    s3db = current.s3db
 
     tablename, record = s3_rheader_resource(r)
     if tablename != r.tablename:
-        resource = current.s3db.resource(tablename, id=record.id)
+        resource = s3db.resource(tablename, id=record.id)
     else:
         resource = r.resource
 
@@ -2979,7 +3002,63 @@ def drk_org_rheader(r, tabs=None):
     if record:
         T = current.T
 
-        if tablename == "org_facility":
+        if tablename == "org_organisation":
+
+            table = resource.table
+
+            # Custom tabs
+            tabs = [(T("Basic Details"), None),
+                    (T("Branches"), "branch"),
+                    (T("Facilities"), "facility"),
+                    (T("Staff & Volunteers"), "human_resource"),
+                    #(T("Projects"), "project"),
+                    (T("Counseling Themes"), "response_theme"),
+                    ]
+
+            rheader_tabs = s3_rheader_tabs(r, tabs)
+
+            # Custom header
+            from gluon import TABLE, TR, TH, TD
+            rheader = DIV()
+
+            # Name
+            record_data = TABLE(TR(TH("%s: " % table.name.label),
+                                   record.name,
+                                   ),
+                                )
+
+            # Parent Organisation
+            record_id = record.id
+            if record.root_organisation != record_id:
+                btable = s3db.org_organisation_branch
+                query = (btable.branch_id == record_id) & \
+                        (btable.organisation_id == table.id)
+                row = current.db(query).select(table.id,
+                                               table.name,
+                                               limitby = (0, 1),
+                                               ).first()
+                if row:
+                    record_data.append(TR(TH("%s: " % T("Branch of")),
+                                          A(row.name, _href=URL(args=[row.id, "read"])),
+                                          ))
+
+            # Website as link
+            if record.website:
+                record_data.append(TR(TH("%s: " % table.website.label),
+                                      A(record.website, _href=record.website)))
+
+            logo = s3db.org_organisation_logo(record)
+            if logo:
+                rheader.append(TABLE(TR(TD(logo),
+                                        TD(record_data),
+                                        )))
+            else:
+                rheader.append(record_data)
+
+            rheader.append(rheader_tabs)
+            return rheader
+
+        elif tablename == "org_facility":
 
             if not tabs:
                 tabs = [(T("Basic Details"), None),
